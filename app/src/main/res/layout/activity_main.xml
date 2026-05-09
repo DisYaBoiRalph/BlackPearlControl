@@ -1,0 +1,225 @@
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/main"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="?attr/colorSurface">
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/settingsContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        app:layout_constraintBottom_toTopOf="@id/bottom_navigation"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Black Pearl Control"
+                android:textAppearance="?attr/textAppearanceHeadlineMedium"
+                android:layout_marginBottom="24dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="24dp"
+                style="@style/Widget.Material3.CardView.Elevated">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Output Control" android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Master Volume" android:layout_marginTop="16dp" />
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/volumeSlider" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:valueFrom="0" android:valueTo="100" android:value="50" />
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Channel Balance" android:layout_marginTop="8dp" />
+
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/balanceSlider"
+                        android:layout_width="match_parent"
+                        android:layout_height="34dp"
+                        android:value="15"
+                        android:valueFrom="0"
+                        android:valueTo="30" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="24dp"
+                style="@style/Widget.Material3.CardView.Filled">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+
+                    <com.google.android.material.textview.MaterialTextView
+                        android:id="@+id/materialTextView"
+                        android:layout_width="match_parent"
+                        android:layout_height="32dp"
+                        android:text="DAC Settings"
+                        android:textAppearance="?attr/textAppearanceTitleMedium" />
+
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:hint="Digital Filter" android:layout_marginBottom="12dp">
+                        <AutoCompleteTextView android:id="@+id/filterSelector" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:hint="Gain Mode" android:layout_marginBottom="12dp">
+                        <AutoCompleteTextView android:id="@+id/gainSelector" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                    <com.google.android.material.textfield.TextInputLayout
+                        style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:hint="Amp Topology">
+                        <AutoCompleteTextView android:id="@+id/ampSelector" android:layout_width="match_parent"
+                            android:layout_height="wrap_content" android:inputType="none" />
+                    </com.google.android.material.textfield.TextInputLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:cardCornerRadius="24dp"
+                style="@style/Widget.Material3.CardView.Elevated">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp">
+                    <com.google.android.material.textview.MaterialTextView
+                        android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Microphone Gain" android:textAppearance="?attr/textAppearanceTitleMedium" />
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/micGainSlider" android:layout_width="match_parent"
+                        android:layout_height="wrap_content" android:valueFrom="0" android:valueTo="30" android:value="15" />
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnFactoryReset"
+                style="@style/Widget.Material3.Button.TextButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Factory Reset All Settings"
+                android:textColor="?attr/colorError"
+                app:icon="@android:drawable/ic_menu_revert"
+                app:iconTint="?attr/colorError" />
+
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <androidx.core.widget.NestedScrollView
+        android:id="@+id/eqContainer"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toTopOf="@id/bottom_navigation"
+        app:layout_constraintTop_toTopOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <com.google.android.material.textview.MaterialTextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Parametric EQ"
+                android:textAppearance="?attr/textAppearanceHeadlineMedium"
+                android:layout_marginBottom="24dp" />
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="220dp"
+                android:layout_marginBottom="16dp"
+                app:cardBackgroundColor="#1A1C1E"
+                app:cardCornerRadius="16dp">
+
+                <com.chesaudio.bpcontrol.EqGraphView
+                    android:id="@+id/eqGraph"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:padding="8dp" />
+            </com.google.android.material.card.MaterialCardView>
+
+            <com.google.android.material.card.MaterialCardView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="16dp"
+                app:cardCornerRadius="16dp">
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:padding="16dp"
+                    android:orientation="vertical">
+
+                    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                        android:text="Master Volume (Digital Ceiling)" />
+                    <com.google.android.material.slider.Slider
+                        android:id="@+id/eqMasterVolume"
+                        android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:valueFrom="0" android:valueTo="100" android:value="50" />
+
+                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                        android:orientation="horizontal" android:layout_marginTop="8dp">
+                        <Button android:id="@+id/btnImport" style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Import AutoEQ" />
+                        <Button android:id="@+id/btnExport" style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                            android:text="Export Preset" />
+                        <Button
+                            android:id="@+id/btnPresets"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Presets" />
+                    </LinearLayout>
+                </LinearLayout>
+            </com.google.android.material.card.MaterialCardView>
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/eqRecyclerView"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                app:layoutManager="androidx.recyclerview.widget.LinearLayoutManager" />
+        </LinearLayout>
+    </androidx.core.widget.NestedScrollView>
+
+    <com.google.android.material.bottomnavigation.BottomNavigationView
+        android:id="@+id/bottom_navigation"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:menu="@menu/bottom_nav_menu" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>
