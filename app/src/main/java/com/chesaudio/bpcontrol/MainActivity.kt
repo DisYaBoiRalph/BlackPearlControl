@@ -71,7 +71,10 @@ class MainActivity : AppCompatActivity() {
     private var dacBalRight = 0
     private var activeSlot: Byte = 0x00 // Required to unlock Flash Saving
 
-    private val commandQueue = kotlinx.coroutines.channels.Channel<ByteArray>(kotlinx.coroutines.channels.Channel.UNLIMITED)
+    private val commandQueue = kotlinx.coroutines.channels.Channel<ByteArray>(
+        capacity = 100,
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
     private var queueProcessorJob: kotlinx.coroutines.Job? = null
     private var readThreadJob: kotlinx.coroutines.Job? = null
     private var pollingJob: kotlinx.coroutines.Job? = null
@@ -1074,10 +1077,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseAutoEq(uri: Uri) {
-        contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-            var bandIdx = 0
+        lifecycleScope.launch(Dispatchers.IO) { // Move entire operation off Main Thread
+            contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                var bandIdx = 0
 
-            // 1. SILENT DATA PARSE (No UI updates yet)
+                // 1. SILENT DATA PARSE (No UI updates yet)
             // Wipe existing bands so a smaller EQ import doesn't leave ghost bands active
             eqBands.forEachIndexed { i, band ->
                 val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
@@ -1112,8 +1116,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
 
-            // 2. HARDWARE PUSH (Background Thread)
-            lifecycleScope.launch(Dispatchers.IO) {
+                // 2. HARDWARE PUSH
+                // (Already in background thread, no new launch needed)
                 isSyncing = true
                 isMassPushing = true
 
@@ -1173,8 +1177,8 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                // REMOVED: bulkTransfer(ep, ByteArray(0)...)
-                // This was causing a deadlock with the read thread's requestWait.
+                // Wait for requestWait(100) in the read thread to naturally time out and release
+                kotlinx.coroutines.delay(150)
 
                 connectionToClose?.apply {
                     interfaceToRelease?.let { releaseInterface(it) }
