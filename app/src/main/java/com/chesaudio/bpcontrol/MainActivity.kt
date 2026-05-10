@@ -131,6 +131,13 @@ class MainActivity : AppCompatActivity() {
         initUi()
         initEq() // FIX: Build the EQ page once in the background at startup
 
+        // CRITICAL FIX: Lock the UI immediately on launch.
+        // It will be automatically unlocked by readDacSettings() once sync completes.
+        findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.isEnabled = false
+        findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.isEnabled = false
+        findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.isEnabled = false
+        findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.isEnabled = false
+
         findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(R.id.bottom_navigation)?.setOnItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.nav_settings -> {
@@ -206,6 +213,7 @@ class MainActivity : AppCompatActivity() {
             eqBands.forEach { it.enabled = false; it.gain = 0f }
             findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
             findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                this.bands = eqBands.map { it.copy() } // FIX: Pass the zeroed-out data to clear the graph
                 pathDirty = true
                 postInvalidate()
             }
@@ -323,12 +331,7 @@ class MainActivity : AppCompatActivity() {
                 usbConnection = connection
                 usbInterface = intf
 
-                endpointIn?.let { ep ->
-                    val dump = ByteArray(64)
-                    connection.bulkTransfer(ep, dump, 64, 50)
-                }
-
-                startQueueProcessor()
+                // CRITICAL FIX: Find the correct endpoint FIRST before attempting any transfers
                 for (i in 0 until intf!!.endpointCount) {
                     val ep = intf.getEndpoint(i)
                     if (ep.direction == UsbConstants.USB_DIR_IN &&
@@ -336,6 +339,14 @@ class MainActivity : AppCompatActivity() {
                         endpointIn = ep
                     }
                 }
+
+                // Now safely flush the hardware buffer using the freshly discovered endpoint
+                endpointIn?.let { ep ->
+                    val dump = ByteArray(64)
+                    connection.bulkTransfer(ep, dump, 64, 50)
+                }
+
+                startQueueProcessor()
                 startReadingThread()
 
                 // Final sync once hardware is ready
@@ -521,9 +532,8 @@ class MainActivity : AppCompatActivity() {
                     val f = rawF.coerceIn(20, 20000)
                     val q = rawQ.coerceIn(0.1f, 10.0f)
 
-                    // Correct negative signed math for Gain
-                    var gRaw = (data[32].toInt() and 0xFF) or (data[33].toInt() shl 8)
-                    if (gRaw > 32767) gRaw -= 65536
+                    // FIX: Properly handle 16-bit signed conversion for negative gains
+                    val gRaw = ((data[32].toInt() and 0xFF) or ((data[33].toInt() and 0xFF) shl 8)).toShort().toInt()
                     val g = gRaw / 256.0f
 
                     val typeCode = data[34]
@@ -539,12 +549,11 @@ class MainActivity : AppCompatActivity() {
                     eqBands[index].apply { freq = f; this.q = q; gain = g; type = bandType; enabled = true }
 
                     // CRITICAL FIX: Prevent UI Thrashing (ANR)
-                    // Do not force the heavy Graph math or RecyclerView to redraw 10 times in a row during a bulk sync.
-                    // readDacSettings() will do one massive, efficient refresh at the very end.
                     if (!isSyncing) {
                         findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                            pathDirty = true
-                            postInvalidate()
+                            this.bands = eqBands.map { it.copy() } // FIX: Actually inject the new data into the graph
+                            this.pathDirty = true
+                            this.postInvalidate()
                         }
                         findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyItemChanged(index)
                     }
@@ -636,7 +645,7 @@ class MainActivity : AppCompatActivity() {
                     "Flat EQ (Reset)" -> {
                         val freqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
                         eqBands.forEachIndexed { i, band ->
-                            band.gain = 0f; band.q = 1.0f; band.type = "PK"; band.freq = freqs[i]
+                            band.enabled = true; band.gain = 0f; band.q = 1.0f; band.type = "PK"; band.freq = freqs[i]
                         }
                     }
                     "Bass Boost" -> {
@@ -660,6 +669,7 @@ class MainActivity : AppCompatActivity() {
                 isSyncing = true
                 findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
                 findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                    this.bands = eqBands.map { it.copy() } // FIX: Actually pass the updated preset data to the graph
                     pathDirty = true
                     postInvalidate()
                 }
@@ -937,7 +947,7 @@ class MainActivity : AppCompatActivity() {
                         this.pathDirty = true
                         this.postInvalidate()
                     }
-                    Toast.makeText(this@MainActivity, "DAC Synced", Toast.LENGTH_SHORT).show()
+                   // Toast.makeText(this@MainActivity, "DAC Synced", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -1192,6 +1202,7 @@ class MainActivity : AppCompatActivity() {
         // 3. Clear references immediately so the rest of the app knows we are disconnected
         usbConnection = null
         usbInterface = null
+        endpointIn = null
         pollingJob?.cancel()
 
         resetUiToDefaults()
