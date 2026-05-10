@@ -23,15 +23,16 @@
         <com.google.android.material.textfield.TextInputLayout
             style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
             android:layout_width="85dp"
-            android:layout_height="wrap_content"
+            android:layout_height="38dp"
             android:layout_marginEnd="4dp">
+
             <AutoCompleteTextView
                 android:id="@+id/typeSelector"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:inputType="none"
                 android:padding="8dp"
-                android:textSize="12sp"
-                android:inputType="none" />
+                android:textSize="12sp" />
         </com.google.android.material.textfield.TextInputLayout>
 
         <com.google.android.material.textfield.TextInputLayout
