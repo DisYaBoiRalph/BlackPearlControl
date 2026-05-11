@@ -73,6 +73,7 @@ class MainActivity : AppCompatActivity() {
     private var volumePercent = 50f
     private var isSyncing = false
     private var isMassPushing = false
+    @Volatile private var isQueueActive = false
     private var dacBalLeft = 0   // Track Left side attenuation
     private var dacBalRight = 0
     private var activeSlot: Byte = 0x00 // Required to unlock Flash Saving
@@ -621,13 +622,14 @@ class MainActivity : AppCompatActivity() {
             popup.menu.add("Treble Boost")
 
             popup.setOnMenuItemClickListener { item ->
+                // FIX 1: ALWAYS start from a flat baseline so old presets don't bleed over
+                val freqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+                eqBands.forEachIndexed { i, band ->
+                    band.enabled = true; band.gain = 0f; band.q = 1.0f; band.type = "PK"; band.freq = freqs[i]
+                }
+
                 when (item.title) {
-                    "Flat EQ (Reset)" -> {
-                        val freqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-                        eqBands.forEachIndexed { i, band ->
-                            band.enabled = true; band.gain = 0f; band.q = 1.0f; band.type = "PK"; band.freq = freqs[i]
-                        }
-                    }
+                    "Flat EQ (Reset)" -> { /* Already flat */ }
                     "Bass Boost" -> {
                         eqBands[0].apply { gain = 6f; type = "LS"; freq = 63 }
                         eqBands[1].apply { gain = 3f; type = "PK"; freq = 125 }
@@ -644,31 +646,33 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Force graph and list to visually refresh
-                // 1. Update UI instantly
                 isSyncing = true
                 findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
                 findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                    this.bands = eqBands.map { it.copy() } // FIX: Actually pass the updated preset data to the graph
+                    this.bands = eqBands.map { it.copy() }
                     pathDirty = true
                     postInvalidate()
                 }
 
-                // 2. Push hardware slowly in background to prevent crashes
                 lifecycleScope.launch(Dispatchers.IO) {
                     isMassPushing = true
-                    kotlinx.coroutines.delay(200)
 
+                    // Instantly push all 10 to the queue
                     eqBands.forEachIndexed { index, band ->
                         sendFilterUpdate(index, band, autoLatch = false)
-                        kotlinx.coroutines.delay(20)
                     }
 
-                    kotlinx.coroutines.delay(100)
+                    // Queue the latch at the very end
                     latchSettings()
-                    isMassPushing = false
+
+                    // FIX 2: Bulletproof Deterministic Wait instead of guessing 1.6 seconds.
+                    while (!commandQueue.isEmpty || isQueueActive) {
+                        kotlinx.coroutines.delay(50)
+                    }
+                    kotlinx.coroutines.delay(100) // Small safety buffer
 
                     withContext(Dispatchers.Main) {
+                        isMassPushing = false
                         isSyncing = false
                         debouncedSaveToFlash()
                     }
@@ -785,30 +789,39 @@ class MainActivity : AppCompatActivity() {
         queueProcessorJob?.cancel()
         queueProcessorJob = lifecycleScope.launch(Dispatchers.IO) {
             for (payload in commandQueue) {
-                val connection = usbConnection ?: continue
+                isQueueActive = true // Mark processor as actively working
+                val connection = usbConnection
+                if (connection == null) {
+                    isQueueActive = false
+                    continue
+                }
                 try {
                     val buffer = ByteArray(64)
                     buffer[0] = REPORT_ID.toByte()
                     System.arraycopy(payload, 0, buffer, 1, payload.size.coerceAtMost(63))
                     val interfaceId = usbInterface?.id ?: 0
 
-                    // CRITICAL FIX: Lock the USB bus before writing to prevent thread collisions
-                    val result = usbMutex.withLock {
-                        if (usbConnection != null) {
-                            connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, buffer, 64, 1000)
-                        } else -1
-                    }
+                    var result = -1
+                    var retryCount = 0
 
-                    if (result < 0) {
-                        Log.e("USB", "Transfer Failed. Attempting Clear Halt...")
-                        usbMutex.withLock {
-                            usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
+                    // CRITICAL FIX: Retry loop ensures hardware drops are recovered instead of silently failing
+                    while (result < 0 && retryCount < 3) {
+                        result = usbMutex.withLock {
+                            if (usbConnection != null) {
+                                connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, buffer, 64, 1000)
+                            } else -1
                         }
-                        kotlinx.coroutines.delay(100)
-                        continue
+
+                        if (result < 0) {
+                            Log.e("USB", "Transfer Failed. Attempting Clear Halt and Retry...")
+                            usbMutex.withLock {
+                                usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
+                            }
+                            kotlinx.coroutines.delay(50)
+                            retryCount++
+                        }
                     }
 
-                    // Delays remain OUTSIDE the lock to allow reads to happen between writes
                     val delayTime = when {
                         payload.size > 1 && payload[1] == CMD_FLASH_EQ -> 500L
                         payload.size > 1 && payload[0] == WRITE && payload[1] == CMD_PEQ_VALUES -> 150L
@@ -817,6 +830,11 @@ class MainActivity : AppCompatActivity() {
                     kotlinx.coroutines.delay(delayTime)
                 } catch (e: Exception) {
                     Log.e("USB", "Queue Crash", e)
+                } finally {
+                    // Only release active state if there is nothing waiting in the buffer
+                    if (commandQueue.isEmpty) {
+                        isQueueActive = false
+                    }
                 }
             }
         }
@@ -1077,33 +1095,31 @@ class MainActivity : AppCompatActivity() {
                 contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
                     val lines = reader.readLines()
 
-                    // --- 1. SAFE PARSE INTO TEMPORARY VARIABLES ---
                     val tempBands = mutableListOf<FilterBand>()
 
                     lines.take(100).forEach { rawLine ->
                         val line = rawLine.trim().uppercase()
 
-                        // FIX: Removed PREAMP parsing entirely. It will no longer hijack master volume.
-
                         if (line.startsWith("FILTER") && tempBands.size < 10) {
-                            // Added optional '=' check in regex to handle different AutoEQ export styles
-                            val fcMatch = Regex("FC\\s*=?\\s*([\\d.]+)").find(line)
-                            val gainMatch = Regex("GAIN\\s*=?\\s*([-+.\\d]+)").find(line)
-                            val qMatch = Regex("Q\\s*=?\\s*([\\d.]+)").find(line)
+                            // CRITICAL FIX 1: Added [:=]? to safely parse colons, equals, or spaces
+                            val fcMatch = Regex("FC\\s*[:=]?\\s*([\\d.]+)").find(line)
+                            val gainMatch = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)").find(line)
+                            val qMatch = Regex("Q\\s*[:=]?\\s*([\\d.]+)").find(line)
 
                             if (fcMatch != null) {
                                 val f = fcMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
                                 val g = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
                                 val q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
                                 val t = if (line.contains("LS")) "LS" else if (line.contains("HS")) "HS" else "PK"
-                                val en = line.contains("ON")
+
+                                // CRITICAL FIX 2: Assume band is ON unless explicitly disabled
+                                val en = !line.contains("OFF")
 
                                 tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
                             }
                         }
                     }
 
-                    // --- 2. THE STRICT SAFETY GATE ---
                     if (tempBands.isEmpty()) {
                         withContext(Dispatchers.Main) {
                             Toast.makeText(this@MainActivity, "Error: No valid AutoEQ filters found", Toast.LENGTH_LONG).show()
@@ -1111,7 +1127,6 @@ class MainActivity : AppCompatActivity() {
                         return@launch
                     }
 
-                    // --- 3. INSTANT UI UPDATE (Fixed Lag/Not Updating) ---
                     withContext(Dispatchers.Main) {
                         val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
                         for (i in 0 until 10) {
@@ -1123,7 +1138,6 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
 
-                        // Force UI to redraw immediately before hardware starts choking the background thread
                         findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
                         findViewById<EqGraphView>(R.id.eqGraph)?.apply {
                             this.bands = eqBands.map { it.copy() }
@@ -1134,20 +1148,20 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    // --- 4. HARDWARE PUSH ---
                     isSyncing = true
                     isMassPushing = true
-                    kotlinx.coroutines.delay(100)
 
-                    // FIX: Push all 10 commands directly to the queue instantly.
-                    // The queue processor already has a 40ms delay built-in, so we don't need manual delays here.
                     eqBands.forEachIndexed { index, band ->
                         sendFilterUpdate(index, band, autoLatch = false)
                     }
-
-                    // Wait for queue processor to catch up, then latch
-                    kotlinx.coroutines.delay(500)
                     latchSettings()
+
+                    // CRITICAL FIX 3: Bulletproof Deterministic Wait.
+                    // Wait until the buffer is empty AND the processor has fully finished execution delays
+                    while (!commandQueue.isEmpty || isQueueActive) {
+                        kotlinx.coroutines.delay(50)
+                    }
+                    kotlinx.coroutines.delay(100) // Small safety buffer
 
                     withContext(Dispatchers.Main) {
                         isMassPushing = false
