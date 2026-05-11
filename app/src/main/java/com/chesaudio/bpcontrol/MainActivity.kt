@@ -19,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -44,6 +45,8 @@ class MainActivity : AppCompatActivity() {
     private val gainOptions = arrayOf("LOW", "HIGH")
     private val ampOptions = arrayOf("CLASS H", "CLASS AB")
 
+    private val usbMutex = Mutex() // CRITICAL: Prevents thread collision kernel panics
+
     private val VID = 0x3302
     private val PID = 0x43E8
     private val REPORT_ID = 0x4B
@@ -64,6 +67,9 @@ class MainActivity : AppCompatActivity() {
     private val VOL_MAX_RAW = 6440
     private val TYPE_CODES = mapOf("PK" to 0x02.toByte(), "LS" to 0x03.toByte(), "HS" to 0x04.toByte())
 
+    private var isUserTouchingSlider = false
+    private var lastSliderReleaseTime = 0L
+
     private var volumePercent = 50f
     private var isSyncing = false
     private var isMassPushing = false
@@ -76,7 +82,6 @@ class MainActivity : AppCompatActivity() {
         onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
     )
     private var queueProcessorJob: kotlinx.coroutines.Job? = null
-    private var readThreadJob: kotlinx.coroutines.Job? = null
     private var pollingJob: kotlinx.coroutines.Job? = null
     private var volumeDebounceJob: kotlinx.coroutines.Job? = null
     private var isPermissionRequested = false
@@ -122,11 +127,13 @@ class MainActivity : AppCompatActivity() {
         filter.addAction(UsbManager.ACTION_USB_DEVICE_DETACHED)
         filter.addAction(UsbManager.ACTION_USB_DEVICE_ATTACHED)
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(usbReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-        } else {
-            registerReceiver(usbReceiver, filter)
-        }
+        // FIX: Let AndroidX handle the API level branching and exact flag mapping
+        ContextCompat.registerReceiver(
+            this,
+            usbReceiver,
+            filter,
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         initUi()
         initEq() // FIX: Build the EQ page once in the background at startup
@@ -159,14 +166,23 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        isAppInFocus = true // Set immediately
-        startConnectionWatchdog()
+        isAppInFocus = true
+
+        if (usbConnection == null) {
+            // App just launched or was fully killed, start hunting for the DAC
+            startConnectionWatchdog()
+        } else {
+            // App came back from background, connection is already alive
+            // Just refresh the UI and restart the volume listener
+            readDacSettings()
+            startVolumePolling()
+        }
     }
 
     override fun onPause() {
-        isAppInFocus = false // Set immediately to stop threads from queueing new requests
+        isAppInFocus = false
+        // Stop background polling to save battery, but DO NOT sever the USB connection
         pollingJob?.cancel()
-        closeUsbConnection()
         super.onPause()
     }
 
@@ -247,7 +263,8 @@ class MainActivity : AppCompatActivity() {
                 band.apply {
                     enabled = true; type = "PK"; freq = defaultFreqs[i]; gain = 0f; q = 1.0f
                 }
-                sendFilterUpdate(i, band)
+                // FIX: Pass autoLatch = false to prevent queue flooding
+                sendFilterUpdate(i, band, autoLatch = false)
                 kotlinx.coroutines.delay(40)
             }
 
@@ -266,6 +283,44 @@ class MainActivity : AppCompatActivity() {
     private fun saveToFlash() {
         if (usbConnection == null) return
         sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, 0x01, END))
+    }
+
+    // Added 'suspend' keyword to allow locking
+    private suspend fun pullValueSync(cmd: Byte, p1: Byte = 0x00, p2: Byte = 0x00, p3: Byte = 0x00): ByteArray? {
+        val connection = usbConnection ?: return null
+        val interfaceId = usbInterface?.id ?: 0
+        val inEndpoint = endpointIn ?: return null
+
+        return usbMutex.withLock {
+            try {
+                val outBuffer = ByteArray(64)
+                outBuffer[0] = REPORT_ID.toByte()
+                outBuffer[1] = READ
+                outBuffer[2] = cmd
+                outBuffer[3] = p1
+                outBuffer[4] = p2
+                outBuffer[5] = p3
+
+                // FIX: Reduced timeout to 100ms. Prevents locking the bus if DAC hangs.
+                val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, outBuffer, 64, 100)
+                if (writeResult < 0) return@withLock null
+
+                val inBuffer = ByteArray(64)
+                for (i in 0..3) {
+                    // FIX: Reduced timeout to 50ms.
+                    val readResult = connection.bulkTransfer(inEndpoint, inBuffer, 64, 50)
+
+                    if (readResult > 0 && inBuffer[1] == READ && inBuffer[2] == cmd) {
+                        return@withLock inBuffer
+                    }
+                    if (readResult > 0) kotlinx.coroutines.delay(5)
+                }
+                null
+            } catch (e: Exception) {
+                Log.e("USB", "Hardware detached mid-read", e)
+                null
+            }
+        }
     }
 
     private fun findAndConnect() {
@@ -340,14 +395,22 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                // Now safely flush the hardware buffer using the freshly discovered endpoint
+                // CRITICAL FIX: Aggressively drain the hardware buffer of all stale packets
+                // CRITICAL FIX: Lock the bus while aggressively draining stale packets
                 endpointIn?.let { ep ->
                     val dump = ByteArray(64)
-                    connection.bulkTransfer(ep, dump, 64, 50)
+                    var bytesRead: Int
+                    var flushAttempts = 0
+                    usbMutex.withLock {
+                        do {
+                            bytesRead = connection.bulkTransfer(ep, dump, 64, 20)
+                            flushAttempts++
+                        } while (bytesRead > 0 && flushAttempts < 10)
+                    }
                 }
 
                 startQueueProcessor()
-                startReadingThread()
+
 
                 // Final sync once hardware is ready
                 kotlinx.coroutines.delay(500)
@@ -363,17 +426,32 @@ class MainActivity : AppCompatActivity() {
             while (usbConnection != null) {
                 kotlinx.coroutines.delay(1000)
 
-                // TECHNIQUE: Stay silent if focus is lost, if we are mass pushing,
-                // or if there are commands waiting in the queue.
-                // This stops the "Read" thread from touching the USB bus
-                // only during mass AutoEQ pushes, allowing Sync reads to properly catch data.
-                if (!isAppInFocus || isMassPushing) {
-                    kotlinx.coroutines.delay(200)
-                    continue
-                }
+                // THE GUARD: Do nothing if out of focus, mass pushing, or USER IS TOUCHING SLIDER
+                if (!isAppInFocus || isMassPushing || isUserTouchingSlider) continue
 
-                if (!isSyncing && volumeDebounceJob?.isActive != true) {
-                    sendHidCommand(byteArrayOf(READ, CMD_GLOBAL_GAIN, END, 0x00))
+                // Wait an extra 1000ms after they let go to ensure the DAC saved the setting
+                if (System.currentTimeMillis() - lastSliderReleaseTime < 1000) continue
+
+                // 1. Synchronously ask hardware for volume
+                val response = pullValueSync(CMD_GLOBAL_GAIN, END, 0x00) ?: continue
+
+                // 2. Parse volume safely
+                val rawVol = ((response[4].toInt() and 0xFF) or ((response[5].toInt() and 0xFF) shl 8)).toShort().toInt()
+                if (rawVol == 0 && response[6].toInt() == 0) continue // Ignore garbage
+
+                val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
+                val roundedVol = Math.round(exactVol).toFloat()
+
+                // 3. Apply to UI safely
+                if (abs(volumePercent - roundedVol) >= 1.0f) {
+                    volumePercent = roundedVol
+                    withContext(Dispatchers.Main) {
+                        // Double check interlock right before UI update
+                        if (!isUserTouchingSlider) {
+                            findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.value = volumePercent
+                            findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.value = volumePercent
+                        }
+                    }
                 }
             }
         }
@@ -416,10 +494,24 @@ class MainActivity : AppCompatActivity() {
         }
 
         findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.apply {
-            stepSize = 1f // FIX: Snaps slider to whole numbers
+            stepSize = 1f
+
+            addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                    isUserTouchingSlider = true
+                }
+                override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                    lastSliderReleaseTime = System.currentTimeMillis()
+                    lifecycleScope.launch {
+                        kotlinx.coroutines.delay(500)
+                        isUserTouchingSlider = false
+                    }
+                }
+            })
+
             addOnChangeListener { _, value, fromUser ->
                 if (fromUser && !isSyncing) {
-                    volumePercent = value // value is now always an integer like 50.0
+                    volumePercent = value
                     val now = System.currentTimeMillis()
 
                     if (now - lastVolTime > 40) {
@@ -487,118 +579,6 @@ class MainActivity : AppCompatActivity() {
             this.preampDb = headroomDb
             this.pathDirty = true
             this.postInvalidate()
-        }
-    }
-
-    private fun parseResponse(cmd: Byte, data: ByteArray) {
-        val value = data[4].toInt()
-
-        when (cmd) {
-            CMD_GLOBAL_GAIN -> {
-                // Correctly handle the 16-bit signed volume range (-9472 to 6440)
-                val rawVol = ((data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)).toShort().toInt()
-
-                // Safety: Ignore garbage "all-zero" packets that can occur during USB handshake
-                if (rawVol == 0 && data[6].toInt() == 0) return
-
-                val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
-                val roundedVol = Math.round(exactVol).toFloat()
-
-                // Only update if the integer value actually changed
-                if (abs(volumePercent - roundedVol) >= 1.0f) {
-                    volumePercent = roundedVol
-
-                    findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.value = volumePercent
-                    findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.value = volumePercent
-
-                    val headroomDb = (VOL_MAX_RAW - rawVol.toShort()).toFloat() / 256f
-                    findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                        this.preampDb = headroomDb
-                        this.pathDirty = true
-                        this.postInvalidate()
-                    }
-                }
-            }
-
-            CMD_PEQ_VALUES -> { // 0x09 Handle Parametric EQ
-                val index = data[5].toInt()
-                if (index in 0 until 10) {
-                    // CRITICAL FIX: Prevent Native UI crashes!
-                    // If the DAC returns empty data (0), the graph attempts log10(0) or divide-by-zero.
-                    // This creates 'NaN' or '-Infinity', which instantly crashes Android's hardware renderer.
-                    val rawF = (data[28].toInt() and 0xFF) or ((data[29].toInt() and 0xFF) shl 8)
-                    val rawQ = ((data[30].toInt() and 0xFF) or ((data[31].toInt() and 0xFF) shl 8)) / 256.0f
-
-                    val f = rawF.coerceIn(20, 20000)
-                    val q = rawQ.coerceIn(0.1f, 10.0f)
-
-                    // FIX: Properly handle 16-bit signed conversion for negative gains
-                    val gRaw = ((data[32].toInt() and 0xFF) or ((data[33].toInt() and 0xFF) shl 8)).toShort().toInt()
-                    val g = gRaw / 256.0f
-
-                    val typeCode = data[34]
-                    val bandType = when (typeCode.toInt()) {
-                        0x02 -> "PK"
-                        0x03 -> "LS"
-                        0x04 -> "HS"
-                        else -> "PK"
-                    }
-
-                    activeSlot = data[36] // Capture the DAC's current memory slot
-
-                    eqBands[index].apply { freq = f; this.q = q; gain = g; type = bandType; enabled = true }
-
-                    // CRITICAL FIX: Prevent UI Thrashing (ANR)
-                    if (!isSyncing) {
-                        findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                            this.bands = eqBands.map { it.copy() } // FIX: Actually inject the new data into the graph
-                            this.pathDirty = true
-                            this.postInvalidate()
-                        }
-                        findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyItemChanged(index)
-                    }
-                }
-            }
-
-            CMD_BALANCE -> { // 0x16 Handle Channel Balance
-                val sideFlag = data[4]
-                val mag = data[6].toInt() and 0xFF
-
-                // Logic directly adapted from your queryChannelBalance.py
-                if (sideFlag == 0x01.toByte()) { // Left Channel
-                    dacBalLeft = if (mag > 0) (mag - 256) else 0
-                } else { // Right Channel
-                    dacBalRight = if (mag > 0) (256 - mag) else 0
-                }
-
-                // Strength Check & Snap-to-Zero (Matching Python's ghosting logic)
-                val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
-                val finalBal = if (abs(combined) <= 1) 0f else combined.toFloat()
-
-                findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.value = finalBal.coerceIn(-15f, 15f)
-            }
-
-            CMD_MIC_GAIN -> { // 0x02 Handle Microphone Gain
-                val micDb = data[5].toInt().coerceIn(-15, 15)
-                findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.value = micDb.toFloat()
-            }
-
-            // Handle Dropdown Selectors with safety checks
-            CMD_FILTER -> {
-                filterOptions.getOrNull(value - 1)?.let { text ->
-                    findViewById<AutoCompleteTextView>(R.id.filterSelector)?.setText(text, false)
-                }
-            }
-            CMD_GAIN_MODE -> {
-                gainOptions.getOrNull(value)?.let { text ->
-                    findViewById<AutoCompleteTextView>(R.id.gainSelector)?.setText(text, false)
-                }
-            }
-            CMD_AMP_TOPO -> {
-                ampOptions.getOrNull(value)?.let { text ->
-                    findViewById<AutoCompleteTextView>(R.id.ampSelector)?.setText(text, false)
-                }
-            }
         }
     }
 
@@ -701,8 +681,22 @@ class MainActivity : AppCompatActivity() {
         val eqMasterSlider = findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)
         eqMasterSlider?.apply {
             clearOnChangeListeners()
-            stepSize = 1f // FIX: Snaps slider to whole numbers
+            stepSize = 1f
             this.value = volumePercent
+
+            addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                    isUserTouchingSlider = true
+                }
+                override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                    lastSliderReleaseTime = System.currentTimeMillis()
+                    lifecycleScope.launch {
+                        kotlinx.coroutines.delay(500)
+                        isUserTouchingSlider = false
+                    }
+                }
+            })
+
             addOnChangeListener { _, value, fromUser ->
                 if (fromUser && !isSyncing) {
                     volumePercent = value
@@ -796,107 +790,34 @@ class MainActivity : AppCompatActivity() {
                     val buffer = ByteArray(64)
                     buffer[0] = REPORT_ID.toByte()
                     System.arraycopy(payload, 0, buffer, 1, payload.size.coerceAtMost(63))
-
-                    // Safety check: Ensure the connection is still valid before the transfer
-                    // CRITICAL FIX: The 4th parameter MUST be the correct Interface ID, not 0.
                     val interfaceId = usbInterface?.id ?: 0
 
-                    // Safety check: Ensure the connection is still valid before the transfer
-                    val result = if (usbConnection != null) {
-                        connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, buffer, 64, 1000)
-                    } else -1
+                    // CRITICAL FIX: Lock the USB bus before writing to prevent thread collisions
+                    val result = usbMutex.withLock {
+                        if (usbConnection != null) {
+                            connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, buffer, 64, 1000)
+                        } else -1
+                    }
 
                     if (result < 0) {
                         Log.e("USB", "Transfer Failed. Attempting Clear Halt...")
-                        // Attempt to clear the hardware stall before giving up
-                        // 0x01 = CLEAR_FEATURE, 0x00 = ENDPOINT_HALT
-                        connection.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
-
-                        // Wait a moment for hardware to reset its buffer
+                        usbMutex.withLock {
+                            usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
+                        }
                         kotlinx.coroutines.delay(100)
                         continue
                     }
 
-                    // HARDENING: Drastically increase delays for Bulk Imports
-                    // HARDENING: Drastically increase delays for Bulk Imports
+                    // Delays remain OUTSIDE the lock to allow reads to happen between writes
                     val delayTime = when {
-                        payload.size > 1 && payload[1] == CMD_FLASH_EQ -> 500L // Flash needs half a second
-                        // FIX: Only apply the 150ms delay to PEQ WRITES. PEQ READS should be fast.
+                        payload.size > 1 && payload[1] == CMD_FLASH_EQ -> 500L
                         payload.size > 1 && payload[0] == WRITE && payload[1] == CMD_PEQ_VALUES -> 150L
-                        else -> 40L // Volume/Others
+                        else -> 40L
                     }
                     kotlinx.coroutines.delay(delayTime)
                 } catch (e: Exception) {
                     Log.e("USB", "Queue Crash", e)
                 }
-            }
-        }
-    }
-
-    private fun startReadingThread() {
-        readThreadJob?.cancel()
-        readThreadJob = lifecycleScope.launch(Dispatchers.IO) {
-            val ep = endpointIn ?: return@launch
-            val connection = usbConnection ?: return@launch
-
-            val request = UsbRequest()
-            request.initialize(connection, ep)
-            val byteBuffer = java.nio.ByteBuffer.allocate(64)
-
-            // CRITICAL: Tracks if a request is currently "in-flight" in the kernel.
-            // This prevents the IllegalStateException (Double Queue) crash.
-            var isRequestPending = false
-
-            while (usbConnection != null && readThreadJob?.isActive == true) {
-                if (!isAppInFocus || isMassPushing) {
-                    // If we lose focus, we wait. If a request is pending,
-                    // we must eventually reap it before closing the app.
-                    kotlinx.coroutines.delay(200); continue
-                }
-
-                // 1. Only queue a new request if the kernel isn't already holding one.
-                if (!isRequestPending) {
-                    byteBuffer.clear()
-                    if (request.queue(byteBuffer)) {
-                        isRequestPending = true
-                    } else {
-                        // If queueing fails (e.g. device disconnected), exit the loop.
-                        break
-                    }
-                }
-
-                // 2. Wait for the kernel to signal completion.
-                // We wrap this in a catch block to handle the TimeoutException gracefully.
-                val finishedRequest = try {
-                    connection.requestWait(100)
-                } catch (e: Exception) {
-                    null
-                }
-
-                // 3. If the request finished, mark it as ready to be re-queued.
-                if (finishedRequest == request) {
-                    isRequestPending = false
-
-                    val data = byteBuffer.array()
-                    if (data.size >= 8 && data[1] == READ) {
-                        val dataCopy = data.copyOf()
-                        withContext(Dispatchers.Main) { parseResponse(dataCopy[2], dataCopy) }
-                    }
-                }
-
-                // NOTE: If finishedRequest is null (timeout), isRequestPending stays TRUE.
-                // The loop will skip the queue() step and go straight back to requestWait().
-            }
-
-            // Cleanup: Only close the request if the coroutine wasn't cancelled.
-            // This prevents a JNI deadlock/freeze where request.close() and
-            // connection.close() collide during focus loss.
-            try {
-                if (readThreadJob?.isActive == true) {
-                    request.close()
-                }
-            } catch (e: Exception) {
-                Log.e("USB", "Request Close Error", e)
             }
         }
     }
@@ -907,47 +828,111 @@ class MainActivity : AppCompatActivity() {
             try {
                 isSyncing = true
 
-                // 1. Read Global Settings (Filter, Gain Mode, Amp, Volume)
-                val globalCmds = byteArrayOf(CMD_FILTER, CMD_GAIN_MODE, CMD_AMP_TOPO, CMD_GLOBAL_GAIN)
-                for (cmd in globalCmds) {
-                    sendHidCommand(byteArrayOf(READ, cmd, END, 0x00))
-                    kotlinx.coroutines.delay(80)
+                // 1. Read Filter
+                pullValueSync(CMD_FILTER, END, 0x00)?.let { data ->
+                    val value = data[4].toInt()
+                    withContext(Dispatchers.Main) {
+                        filterOptions.getOrNull(value - 1)?.let { text ->
+                            findViewById<AutoCompleteTextView>(R.id.filterSelector)?.setText(text, false)
+                        }
+                    }
+                }
+                kotlinx.coroutines.delay(60)
+
+                // 2. Read Gain Mode
+                pullValueSync(CMD_GAIN_MODE, END, 0x00)?.let { data ->
+                    val value = data[4].toInt()
+                    withContext(Dispatchers.Main) {
+                        gainOptions.getOrNull(value)?.let { text ->
+                            findViewById<AutoCompleteTextView>(R.id.gainSelector)?.setText(text, false)
+                        }
+                    }
+                }
+                kotlinx.coroutines.delay(60)
+
+                // 3. Read Amp Topo
+                pullValueSync(CMD_AMP_TOPO, END, 0x00)?.let { data ->
+                    val value = data[4].toInt()
+                    withContext(Dispatchers.Main) {
+                        ampOptions.getOrNull(value)?.let { text ->
+                            findViewById<AutoCompleteTextView>(R.id.ampSelector)?.setText(text, false)
+                        }
+                    }
+                }
+                kotlinx.coroutines.delay(60)
+
+                // 4. Read Volume
+                pullValueSync(CMD_GLOBAL_GAIN, END, 0x00)?.let { data ->
+                    val rawVol = ((data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)).toShort().toInt()
+                    if (!(rawVol == 0 && data[6].toInt() == 0)) { // Ignore garbage
+                        val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
+                        volumePercent = Math.round(exactVol).toFloat()
+                    }
+                }
+                kotlinx.coroutines.delay(60)
+
+                // 5. Read Mic Gain
+                pullValueSync(CMD_MIC_GAIN, 0x02, 0x02)?.let { data ->
+                    val micDb = data[5].toInt().coerceIn(-15, 15)
+                    withContext(Dispatchers.Main) {
+                        findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.value = micDb.toFloat()
+                    }
+                }
+                kotlinx.coroutines.delay(60)
+
+                // 6. Read Balance
+                pullValueSync(CMD_BALANCE, 0x04, 0x01)?.let { data -> // Left
+                    val mag = data[6].toInt() and 0xFF
+                    dacBalLeft = if (mag > 0) (mag - 256) else 0
+                }
+                kotlinx.coroutines.delay(60)
+                pullValueSync(CMD_BALANCE, 0x04, 0x00)?.let { data -> // Right
+                    val mag = data[6].toInt() and 0xFF
+                    dacBalRight = if (mag > 0) (256 - mag) else 0
+                }
+                kotlinx.coroutines.delay(60)
+
+                val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
+                val finalBal = if (abs(combined) <= 1) 0f else combined.toFloat()
+                withContext(Dispatchers.Main) {
+                    findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.value = finalBal.coerceIn(-15f, 15f)
                 }
 
-                // 2. Read Mic Gain
-                sendHidCommand(byteArrayOf(READ, CMD_MIC_GAIN, 0x02, 0x02))
-                kotlinx.coroutines.delay(80)
-
-                // 3. Read Balance (Matches your Python Logic: sf=0x01 for Left, 0x00 for Right)
-                sendHidCommand(byteArrayOf(READ, CMD_BALANCE, 0x04, 0x01, 0x00, 0x00)) // Query Left
-                kotlinx.coroutines.delay(80)
-                sendHidCommand(byteArrayOf(READ, CMD_BALANCE, 0x04, 0x00, 0x00, 0x00)) // Query Right
-                kotlinx.coroutines.delay(80)
-
-                // 4. Read all 10 PEQ Bands
+                // 7. Read PEQ Bands
                 for (i in 0 until 10) {
-                    sendHidCommand(byteArrayOf(READ, CMD_PEQ_VALUES, 0x00, 0x00, i.toByte(), END))
+                    pullValueSync(CMD_PEQ_VALUES, 0x00, 0x00, i.toByte())?.let { data ->
+                        val rawF = (data[28].toInt() and 0xFF) or ((data[29].toInt() and 0xFF) shl 8)
+                        val rawQ = ((data[30].toInt() and 0xFF) or ((data[31].toInt() and 0xFF) shl 8)) / 256.0f
+                        val f = rawF.coerceIn(20, 20000)
+                        val q = rawQ.coerceIn(0.1f, 10.0f)
+                        val gRaw = ((data[32].toInt() and 0xFF) or ((data[33].toInt() and 0xFF) shl 8)).toShort().toInt()
+                        val g = gRaw / 256.0f
+                        val bandType = when (data[34].toInt()) { 0x02 -> "PK"; 0x03 -> "LS"; 0x04 -> "HS"; else -> "PK" }
+
+                        activeSlot = data[36]
+                        eqBands[i].apply { freq = f; this.q = q; gain = g; type = bandType; enabled = true }
+                    }
                     kotlinx.coroutines.delay(60)
                 }
 
             } finally {
                 isSyncing = false
-                // Final UI Latch: Force a complete refresh once all data is trickled in
-                // Final UI Latch: Force a complete refresh once all data is trickled in
                 withContext(Dispatchers.Main) {
-                    // Re-enable controls once sync is complete
-                    findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.isEnabled = true
-                    findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.isEnabled = true
+                    // Re-enable and set UI elements once sync completes
+                    findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.apply { isEnabled = true; value = volumePercent }
+                    findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.apply { isEnabled = true; value = volumePercent }
                     findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.isEnabled = true
                     findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.isEnabled = true
 
                     findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
+
                     findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                        this.bands = eqBands.map { it.copy() } // Snapshot for safety
+                        this.bands = eqBands.map { it.copy() }
+                        val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+                        this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
                         this.pathDirty = true
                         this.postInvalidate()
                     }
-                   // Toast.makeText(this@MainActivity, "DAC Synced", Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -1087,86 +1072,93 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun parseAutoEq(uri: Uri) {
-        lifecycleScope.launch(Dispatchers.IO) { // Move entire operation off Main Thread
-            contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                var bandIdx = 0
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
+                    val lines = reader.readLines()
 
-                // 1. SILENT DATA PARSE (No UI updates yet)
-            // Wipe existing bands so a smaller EQ import doesn't leave ghost bands active
-            eqBands.forEachIndexed { i, band ->
-                val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-                band.apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; q = 1.0f }
-            }
+                    // --- 1. SAFE PARSE INTO TEMPORARY VARIABLES ---
+                    val tempBands = mutableListOf<FilterBand>()
 
-            // Use readLines() to prevent Android URI stream cutoffs and uppercase everything to fix case-sensitivity
-            reader.readLines().forEach { rawLine ->
-                val line = rawLine.trim().uppercase()
+                    lines.take(100).forEach { rawLine ->
+                        val line = rawLine.trim().uppercase()
 
-                if (line.contains("PREAMP:")) {
-                    val match = Regex("PREAMP:\\s*([-+]?[\\d.]+)").find(line)
-                    if (match != null) {
-                        val importedDb = match.groupValues[1].toFloatOrNull() ?: 0f
-                        val rawVal = (VOL_MAX_RAW + (importedDb * 256)).toInt()
-                        val calculatedPercent = ((rawVal - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100)
-                        volumePercent = Math.round(calculatedPercent.coerceIn(0f, 100f)).toFloat()
+                        // FIX: Removed PREAMP parsing entirely. It will no longer hijack master volume.
+
+                        if (line.startsWith("FILTER") && tempBands.size < 10) {
+                            // Added optional '=' check in regex to handle different AutoEQ export styles
+                            val fcMatch = Regex("FC\\s*=?\\s*([\\d.]+)").find(line)
+                            val gainMatch = Regex("GAIN\\s*=?\\s*([-+.\\d]+)").find(line)
+                            val qMatch = Regex("Q\\s*=?\\s*([\\d.]+)").find(line)
+
+                            if (fcMatch != null) {
+                                val f = fcMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
+                                val g = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
+                                val q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
+                                val t = if (line.contains("LS")) "LS" else if (line.contains("HS")) "HS" else "PK"
+                                val en = line.contains("ON")
+
+                                tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
+                            }
+                        }
                     }
-                } else if (line.contains("FILTER") && bandIdx < 10) {
-                    val fcMatch = Regex("FC\\s+([\\d.]+)").find(line)
-                    val gainMatch = Regex("GAIN\\s+([-+.\\d]+)").find(line)
-                    val qMatch = Regex("Q\\s+([\\d.]+)").find(line)
 
-                    eqBands[bandIdx].apply {
-                        freq = fcMatch?.groupValues?.get(1)?.toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
-                        gain = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
-                        q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
-                        type = if (line.contains("LS")) "LS" else if (line.contains("HS")) "HS" else "PK"
-                        enabled = line.contains("ON")
+                    // --- 2. THE STRICT SAFETY GATE ---
+                    if (tempBands.isEmpty()) {
+                        withContext(Dispatchers.Main) {
+                            Toast.makeText(this@MainActivity, "Error: No valid AutoEQ filters found", Toast.LENGTH_LONG).show()
+                        }
+                        return@launch
                     }
-                    bandIdx++
+
+                    // --- 3. INSTANT UI UPDATE (Fixed Lag/Not Updating) ---
+                    withContext(Dispatchers.Main) {
+                        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+                        for (i in 0 until 10) {
+                            if (i < tempBands.size) {
+                                val src = tempBands[i]
+                                eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; this.q = src.q }
+                            } else {
+                                eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
+                            }
+                        }
+
+                        // Force UI to redraw immediately before hardware starts choking the background thread
+                        findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
+                        findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                            this.bands = eqBands.map { it.copy() }
+                            val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+                            this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
+                            this.pathDirty = true
+                            this.postInvalidate()
+                        }
+                    }
+
+                    // --- 4. HARDWARE PUSH ---
+                    isSyncing = true
+                    isMassPushing = true
+                    kotlinx.coroutines.delay(100)
+
+                    // FIX: Push all 10 commands directly to the queue instantly.
+                    // The queue processor already has a 40ms delay built-in, so we don't need manual delays here.
+                    eqBands.forEachIndexed { index, band ->
+                        sendFilterUpdate(index, band, autoLatch = false)
+                    }
+
+                    // Wait for queue processor to catch up, then latch
+                    kotlinx.coroutines.delay(500)
+                    latchSettings()
+
+                    withContext(Dispatchers.Main) {
+                        isMassPushing = false
+                        isSyncing = false
+                        debouncedSaveToFlash()
+                        Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
+                    }
                 }
-            }
-
-                // 2. HARDWARE PUSH
-                // (Already in background thread, no new launch needed)
-                isSyncing = true
-                isMassPushing = true
-
-                // Give the system a moment to settle after file I/O
-                kotlinx.coroutines.delay(300)
-
-                // Push Volume
-                val totalRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-                val clampedRaw = totalRaw.coerceIn(VOL_MIN_RAW, VOL_MAX_RAW)
-                sendHidCommand(byteArrayOf(WRITE, CMD_GLOBAL_GAIN, 0x03, (clampedRaw and 0xFF).toByte(), (clampedRaw shr 8).toByte(), 0x00))
-                kotlinx.coroutines.delay(100)
-
-                // Push Filters in Bulk Mode
-                eqBands.forEachIndexed { index, band ->
-                    sendFilterUpdate(index, band, autoLatch = false)
-                    kotlinx.coroutines.delay(50) // Pacing the queue entries
-                }
-
-                // Single Latch
-                kotlinx.coroutines.delay(200)
-                latchSettings()
-
-                isMassPushing = false
-
-                // 3. UI UPDATE (Final Step - only after hardware is done)
+            } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.value = volumePercent
-                    findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.value = volumePercent
-
-                    findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
-
-                    findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                        pathDirty = true // Recalculate graph math
-                        postInvalidate() // Redraw
-                    }
-
-                    isSyncing = false
-                    debouncedSaveToFlash()
-                    Toast.makeText(this@MainActivity, "Import Successful & Stable", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, "File Error: Could not read file", Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -1175,7 +1167,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun closeUsbConnection() {
         // 1. Signal all jobs to stop immediately
-        readThreadJob?.cancel()
+        //readThreadJob?.cancel()
         queueProcessorJob?.cancel()
         connectionWatchdogJob?.cancel()
         volumeDebounceJob?.cancel()
