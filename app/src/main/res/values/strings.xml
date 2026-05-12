@@ -1,3 +1,21 @@
 <resources>
     <string name="app_name">Black Pearl Control</string>
+    <string name="dac_settings">DAC Settings</string>
+    <string name="black_pearl_control">Black Pearl Control</string>
+    <string name="output_control">Output Control</string>
+    <string name="master_volume">Master Volume</string>
+    <string name="channel_balance">Channel Balance</string>
+    <string name="digital_filter">Digital Filter</string>
+    <string name="gain_mode">Gain Mode</string>
+    <string name="amp_topology">Amp Topology</string>
+    <string name="microphone_gain">Microphone Gain</string>
+    <string name="factory_reset_all_settings">Factory Reset All Settings</string>
+    <string name="parametric_eq">Parametric EQ</string>
+    <string name="master_volume_digital_ceiling">Master Volume (Digital Ceiling)</string>
+    <string name="import_autoeq">Import AutoEQ</string>
+    <string name="export_preset">Export Preset</string>
+    <string name="presets">Presets</string>
+    <string name="freq">Freq</string>
+    <string name="gain">Gain</string>
+    <string name="q">Q</string>
 </resources>

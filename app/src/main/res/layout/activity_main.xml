@@ -1,5 +1,6 @@
 <androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/main"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -21,7 +22,7 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Black Pearl Control"
+                android:text="@string/black_pearl_control"
                 android:textAppearance="?attr/textAppearanceHeadlineMedium"
                 android:layout_marginBottom="24dp" />
 
@@ -38,18 +39,18 @@
                     android:padding="16dp">
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Output Control" android:textAppearance="?attr/textAppearanceTitleMedium" />
+                        android:text="@string/output_control" android:textAppearance="?attr/textAppearanceTitleMedium" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Master Volume" android:layout_marginTop="16dp" />
+                        android:text="@string/master_volume" android:layout_marginTop="16dp" />
                     <com.google.android.material.slider.Slider
                         android:id="@+id/volumeSlider" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:valueFrom="0" android:valueTo="100" android:value="50" />
 
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Channel Balance" android:layout_marginTop="8dp" />
+                        android:text="@string/channel_balance" android:layout_marginTop="8dp" />
 
                     <com.google.android.material.slider.Slider
                         android:id="@+id/balanceSlider"
@@ -77,29 +78,32 @@
                         android:id="@+id/materialTextView"
                         android:layout_width="match_parent"
                         android:layout_height="32dp"
-                        android:text="DAC Settings"
+                        android:text="@string/dac_settings"
                         android:textAppearance="?attr/textAppearanceTitleMedium" />
 
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:hint="Digital Filter" android:layout_marginBottom="12dp">
+                        android:hint="@string/digital_filter" android:layout_marginBottom="12dp">
                         <AutoCompleteTextView android:id="@+id/filterSelector" android:layout_width="match_parent"
-                            android:layout_height="wrap_content" android:inputType="none" />
+                            android:layout_height="wrap_content" android:inputType="none"
+                            tools:ignore="LabelFor" />
                     </com.google.android.material.textfield.TextInputLayout>
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:hint="Gain Mode" android:layout_marginBottom="12dp">
+                        android:hint="@string/gain_mode" android:layout_marginBottom="12dp">
                         <AutoCompleteTextView android:id="@+id/gainSelector" android:layout_width="match_parent"
-                            android:layout_height="wrap_content" android:inputType="none" />
+                            android:layout_height="wrap_content" android:inputType="none"
+                            tools:ignore="LabelFor" />
                     </com.google.android.material.textfield.TextInputLayout>
                     <com.google.android.material.textfield.TextInputLayout
                         style="@style/Widget.Material3.TextInputLayout.OutlinedBox.ExposedDropdownMenu"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:hint="Amp Topology">
+                        android:hint="@string/amp_topology">
                         <AutoCompleteTextView android:id="@+id/ampSelector" android:layout_width="match_parent"
-                            android:layout_height="wrap_content" android:inputType="none" />
+                            android:layout_height="wrap_content" android:inputType="none"
+                            tools:ignore="LabelFor" />
                     </com.google.android.material.textfield.TextInputLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
@@ -116,7 +120,7 @@
                     android:padding="16dp">
                     <com.google.android.material.textview.MaterialTextView
                         android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Microphone Gain" android:textAppearance="?attr/textAppearanceTitleMedium" />
+                        android:text="@string/microphone_gain" android:textAppearance="?attr/textAppearanceTitleMedium" />
                     <com.google.android.material.slider.Slider
                         android:id="@+id/micGainSlider" android:layout_width="match_parent"
                         android:layout_height="wrap_content" android:valueFrom="0" android:valueTo="30" android:value="15" />
@@ -129,7 +133,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="8dp"
-                android:text="Factory Reset All Settings"
+                android:text="@string/factory_reset_all_settings"
                 android:textColor="?attr/colorError"
                 app:icon="@android:drawable/ic_menu_revert"
                 app:iconTint="?attr/colorError" />
@@ -154,7 +158,7 @@
             <com.google.android.material.textview.MaterialTextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Parametric EQ"
+                android:text="@string/parametric_eq"
                 android:textAppearance="?attr/textAppearanceHeadlineMedium"
                 android:layout_marginBottom="24dp" />
 
@@ -184,25 +188,41 @@
                     android:orientation="vertical">
 
                     <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                        android:text="Master Volume (Digital Ceiling)" />
+                        android:text="@string/master_volume_digital_ceiling" />
                     <com.google.android.material.slider.Slider
                         android:id="@+id/eqMasterVolume"
                         android:layout_width="match_parent" android:layout_height="wrap_content"
                         android:valueFrom="0" android:valueTo="100" android:value="50" />
 
-                    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                        android:orientation="horizontal" android:layout_marginTop="8dp">
-                        <Button android:id="@+id/btnImport" style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Import AutoEQ" />
-                        <Button android:id="@+id/btnExport" style="@style/Widget.Material3.Button.TextButton"
-                            android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
-                            android:text="Export Preset" />
+                    <LinearLayout
+                        style="?android:attr/buttonBarStyle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginTop="8dp">
+
+                        <Button
+                            android:id="@+id/btnImport"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/import_autoeq" />
+
+                        <Button
+                            android:id="@+id/btnExport"
+                            style="@style/Widget.Material3.Button.TextButton"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="@string/export_preset" />
+
                         <Button
                             android:id="@+id/btnPresets"
+                            style="?android:attr/buttonBarButtonStyle"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Presets" />
+                            android:text="@string/presets" />
                     </LinearLayout>
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
