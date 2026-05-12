@@ -1,35 +1,62 @@
 package com.chesaudio.bpcontrol
 
+import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.hardware.usb.*
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbInterface
+import android.hardware.usb.UsbManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.text.InputType
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.*
+import android.widget.ArrayAdapter
+import android.widget.AutoCompleteTextView
+import android.widget.Button
+import android.widget.CheckBox
+import android.widget.EditText
+import android.widget.PopupMenu
+import android.widget.TextView
+import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.bottomnavigation.BottomNavigationView
+import com.google.android.material.slider.Slider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.util.Locale
 import kotlin.math.abs
 
+@Suppress("DEPRECATION")
 class MainActivity : AppCompatActivity() {
 
     data class FilterBand(
@@ -78,16 +105,16 @@ class MainActivity : AppCompatActivity() {
     private var dacBalRight = 0
     private var activeSlot: Byte = 0x00 // Required to unlock Flash Saving
 
-    private val commandQueue = kotlinx.coroutines.channels.Channel<ByteArray>(
+    private val commandQueue = Channel<ByteArray>(
         capacity = 100,
-        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+        onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
-    private var queueProcessorJob: kotlinx.coroutines.Job? = null
-    private var pollingJob: kotlinx.coroutines.Job? = null
-    private var volumeDebounceJob: kotlinx.coroutines.Job? = null
+    private var queueProcessorJob: Job? = null
+    private var pollingJob: Job? = null
+    private var volumeDebounceJob: Job? = null
     private var isPermissionRequested = false
     private var isAppInFocus = false // FIX: Declare the focus tracker
-    private var connectionWatchdogJob: kotlinx.coroutines.Job? = null
+    private var connectionWatchdogJob: Job? = null
     private var lastVolTime = 0L // Limits live dragging to 25 FPS
     private val eqBands = MutableList(10) { i ->
         val frequencies = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
@@ -101,7 +128,7 @@ class MainActivity : AppCompatActivity() {
     private var endpointIn: UsbEndpoint? = null
 
     // Flash Debouncer
-    private val flashHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val flashHandler = Handler(Looper.getMainLooper())
     private val flashRunnable = Runnable { saveToFlash() }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -109,7 +136,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val exportLauncher = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
-        uri?.let { saveSettingsToFile(it) }
+        uri?.let { saveSettingsToFile() }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -117,7 +144,7 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
-        usbManager = getSystemService(Context.USB_SERVICE) as UsbManager
+        usbManager = getSystemService(USB_SERVICE) as UsbManager
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
@@ -141,12 +168,12 @@ class MainActivity : AppCompatActivity() {
 
         // CRITICAL FIX: Lock the UI immediately on launch.
         // It will be automatically unlocked by readDacSettings() once sync completes.
-        findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.isEnabled = false
-        findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.isEnabled = false
-        findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.isEnabled = false
-        findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.isEnabled = false
+        findViewById<Slider>(R.id.volumeSlider)?.isEnabled = false
+        findViewById<Slider>(R.id.eqMasterVolume)?.isEnabled = false
+        findViewById<Slider>(R.id.balanceSlider)?.isEnabled = false
+        findViewById<Slider>(R.id.micGainSlider)?.isEnabled = false
 
-        findViewById<com.google.android.material.bottomnavigation.BottomNavigationView>(R.id.bottom_navigation)?.setOnItemSelectedListener { item ->
+        findViewById<BottomNavigationView>(R.id.bottom_navigation)?.setOnItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.nav_settings -> {
                     findViewById<View>(R.id.settingsContainer)?.visibility = View.VISIBLE
@@ -199,7 +226,7 @@ class MainActivity : AppCompatActivity() {
             // Keep trying every 1.5s until a hardware connection is established
             while (usbConnection == null && isAppInFocus) {
                 findAndConnect()
-                kotlinx.coroutines.delay(1500)
+                delay(1500)
                 if (usbConnection != null) {
                     Log.d("USB", "Watchdog: Connection successful.")
                     break
@@ -208,6 +235,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("NotifyDataSetChanged")
     private fun resetUiToDefaults() {
         runOnUiThread {
             isSyncing = true // Prevent phantom commands while clearing
@@ -216,10 +244,10 @@ class MainActivity : AppCompatActivity() {
             // Setting values to 0 onPause causes Android to "save" that 0 state,
             // which then gets restored and pushed to the hardware onResume.
             // Instead, we just disable the controls so they can't be moved.
-            findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.isEnabled = false
-            findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.isEnabled = false
-            findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.isEnabled = false
-            findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.isEnabled = false
+            findViewById<Slider>(R.id.volumeSlider)?.isEnabled = false
+            findViewById<Slider>(R.id.eqMasterVolume)?.isEnabled = false
+            findViewById<Slider>(R.id.balanceSlider)?.isEnabled = false
+            findViewById<Slider>(R.id.micGainSlider)?.isEnabled = false
 
             // 2. Clear Dropdowns
             findViewById<AutoCompleteTextView>(R.id.filterSelector)?.setText("", false)
@@ -266,7 +294,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 // FIX: Pass autoLatch = false to prevent queue flooding
                 sendFilterUpdate(i, band, autoLatch = false)
-                kotlinx.coroutines.delay(40)
+                delay(40)
             }
 
             // 3. Commit to Flash
@@ -303,18 +331,18 @@ class MainActivity : AppCompatActivity() {
                 outBuffer[5] = p3
 
                 // FIX: Reduced timeout to 100ms. Prevents locking the bus if DAC hangs.
-                val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, outBuffer, 64, 100)
+                val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, outBuffer, 64, 100)
                 if (writeResult < 0) return@withLock null
 
                 val inBuffer = ByteArray(64)
-                for (i in 0..3) {
+                (0..3).forEach { _ ->
                     // FIX: Reduced timeout to 50ms.
                     val readResult = connection.bulkTransfer(inEndpoint, inBuffer, 64, 50)
 
                     if (readResult > 0 && inBuffer[1] == READ && inBuffer[2] == cmd) {
                         return@withLock inBuffer
                     }
-                    if (readResult > 0) kotlinx.coroutines.delay(5)
+                    if (readResult > 0) delay(5)
                 }
                 null
             } catch (e: Exception) {
@@ -333,11 +361,8 @@ class MainActivity : AppCompatActivity() {
                 } else if (!isPermissionRequested && isAppInFocus) { // Gatekeeper added
                     isPermissionRequested = true
                     // FIX: Using FLAG_IMMUTABLE completely satisfies Android 14's strict security rules
-                    val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val flags =
                         PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                    } else {
-                        PendingIntent.FLAG_UPDATE_CURRENT
-                    }
 
                     val intent = Intent(ACTION_USB_PERMISSION)
                     intent.setPackage(packageName)
@@ -372,15 +397,15 @@ class MainActivity : AppCompatActivity() {
             if (intf == null) intf = device.getInterface(device.interfaceCount - 1)
 
             // Non-blocking wait for ALSA to settle
-            kotlinx.coroutines.delay(300)
+            delay(300)
 
             var claimed = false
-            for (i in 1..3) {
+            for (i: Int in 1..3) {
                 if (connection.claimInterface(intf, true)) {
                     claimed = true
                     break
                 }
-                kotlinx.coroutines.delay(150) // Non-blocking delay
+                delay(150) // Non-blocking delay
             }
 
             if (claimed) {
@@ -388,7 +413,7 @@ class MainActivity : AppCompatActivity() {
                 usbInterface = intf
 
                 // CRITICAL FIX: Find the correct endpoint FIRST before attempting any transfers
-                for (i in 0 until intf!!.endpointCount) {
+                for (i in 0 until intf.endpointCount) {
                     val ep = intf.getEndpoint(i)
                     if (ep.direction == UsbConstants.USB_DIR_IN &&
                         ep.type == UsbConstants.USB_ENDPOINT_XFER_INT) {
@@ -414,7 +439,7 @@ class MainActivity : AppCompatActivity() {
 
 
                 // Final sync once hardware is ready
-                kotlinx.coroutines.delay(500)
+                delay(500)
                 readDacSettings()
                 startVolumePolling()
             }
@@ -425,7 +450,7 @@ class MainActivity : AppCompatActivity() {
         pollingJob?.cancel()
         pollingJob = lifecycleScope.launch(Dispatchers.IO) {
             while (usbConnection != null) {
-                kotlinx.coroutines.delay(1000)
+                delay(1000)
 
                 // THE GUARD: Do nothing if out of focus, mass pushing, or USER IS TOUCHING SLIDER
                 if (!isAppInFocus || isMassPushing || isUserTouchingSlider) continue
@@ -449,8 +474,8 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) {
                         // Double check interlock right before UI update
                         if (!isUserTouchingSlider) {
-                            findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.value = volumePercent
-                            findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.value = volumePercent
+                            findViewById<Slider>(R.id.volumeSlider)?.value = volumePercent
+                            findViewById<Slider>(R.id.eqMasterVolume)?.value = volumePercent
                         }
                     }
                 }
@@ -463,7 +488,7 @@ class MainActivity : AppCompatActivity() {
         // --- Setup Dropdown Menus ---
         findViewById<AutoCompleteTextView>(R.id.filterSelector)?.apply {
             setAdapter(ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, filterOptions))
-            inputType = android.text.InputType.TYPE_NULL
+            inputType = InputType.TYPE_NULL
             setOnItemClickListener { _, _, position, _ ->
                 if (!isSyncing) {
                     sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, 0x01, (position + 1).toByte(), 0x00))
@@ -474,7 +499,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<AutoCompleteTextView>(R.id.gainSelector)?.apply {
             setAdapter(ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, gainOptions))
-            inputType = android.text.InputType.TYPE_NULL
+            inputType = InputType.TYPE_NULL
             setOnItemClickListener { _, _, position, _ ->
                 if (!isSyncing) {
                     sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, 0x01, position.toByte(), 0x00))
@@ -485,7 +510,7 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<AutoCompleteTextView>(R.id.ampSelector)?.apply {
             setAdapter(ArrayAdapter(this@MainActivity, android.R.layout.simple_list_item_1, ampOptions))
-            inputType = android.text.InputType.TYPE_NULL
+            inputType = InputType.TYPE_NULL
             setOnItemClickListener { _, _, position, _ ->
                 if (!isSyncing) {
                     sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, 0x01, position.toByte(), 0x00))
@@ -494,17 +519,17 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.apply {
+        findViewById<Slider>(R.id.volumeSlider)?.apply {
             stepSize = 1f
 
-            addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
-                override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+            addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: Slider) {
                     isUserTouchingSlider = true
                 }
-                override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                override fun onStopTrackingTouch(slider: Slider) {
                     lastSliderReleaseTime = System.currentTimeMillis()
                     lifecycleScope.launch {
-                        kotlinx.coroutines.delay(500)
+                        delay(500)
                         isUserTouchingSlider = false
                     }
                 }
@@ -522,19 +547,19 @@ class MainActivity : AppCompatActivity() {
 
                     volumeDebounceJob?.cancel()
                     volumeDebounceJob = lifecycleScope.launch {
-                        kotlinx.coroutines.delay(150)
+                        delay(150)
                         updateHardwareVolume(latchAndSave = true)
                     }
                 }
             }
         }
 
-        findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.apply {
+        findViewById<Slider>(R.id.balanceSlider)?.apply {
             valueFrom = -15f; valueTo = 15f; stepSize = 1f
             addOnChangeListener { _, value, fromUser -> if (fromUser) updateBalance(value.toInt()) }
         }
 
-        findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.apply {
+        findViewById<Slider>(R.id.micGainSlider)?.apply {
             valueFrom = -15f; valueTo = 15f; stepSize = 1f
             addOnChangeListener { _, value, fromUser ->
                 if (fromUser) {
@@ -547,7 +572,7 @@ class MainActivity : AppCompatActivity() {
 
         // --- Factory Reset Listener ---
         findViewById<Button>(R.id.btnFactoryReset)?.setOnClickListener {
-            androidx.appcompat.app.AlertDialog.Builder(this)
+            AlertDialog.Builder(this)
                 .setTitle("Factory Reset")
                 .setMessage("This will wipe all EQ presets, volume, and hardware settings. Are you sure?")
                 .setPositiveButton("Reset Everything") { _, _ -> performFactoryReset() }
@@ -569,8 +594,8 @@ class MainActivity : AppCompatActivity() {
             debouncedSaveToFlash()
         }
 
-        findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.value = volumePercent
-        findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.value = volumePercent
+        findViewById<Slider>(R.id.volumeSlider)?.value = volumePercent
+        findViewById<Slider>(R.id.eqMasterVolume)?.value = volumePercent
 
         val headroomDb = (VOL_MAX_RAW - clampedRaw).toFloat() / 256f
         findViewById<EqGraphView>(R.id.eqGraph)?.apply {
@@ -583,6 +608,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("NotifyDataSetChanged")
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun initEq() {
         val recyclerView = findViewById<RecyclerView>(R.id.eqRecyclerView)
         val graph = findViewById<EqGraphView>(R.id.eqGraph)
@@ -667,9 +694,9 @@ class MainActivity : AppCompatActivity() {
 
                     // FIX 2: Bulletproof Deterministic Wait instead of guessing 1.6 seconds.
                     while (!commandQueue.isEmpty || isQueueActive) {
-                        kotlinx.coroutines.delay(50)
+                        delay(50)
                     }
-                    kotlinx.coroutines.delay(100) // Small safety buffer
+                    delay(100) // Small safety buffer
 
                     withContext(Dispatchers.Main) {
                         isMassPushing = false
@@ -682,20 +709,20 @@ class MainActivity : AppCompatActivity() {
             popup.show()
         }
 
-        val eqMasterSlider = findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)
+        val eqMasterSlider = findViewById<Slider>(R.id.eqMasterVolume)
         eqMasterSlider?.apply {
             clearOnChangeListeners()
             stepSize = 1f
             this.value = volumePercent
 
-            addOnSliderTouchListener(object : com.google.android.material.slider.Slider.OnSliderTouchListener {
-                override fun onStartTrackingTouch(slider: com.google.android.material.slider.Slider) {
+            addOnSliderTouchListener(object : Slider.OnSliderTouchListener {
+                override fun onStartTrackingTouch(slider: Slider) {
                     isUserTouchingSlider = true
                 }
-                override fun onStopTrackingTouch(slider: com.google.android.material.slider.Slider) {
+                override fun onStopTrackingTouch(slider: Slider) {
                     lastSliderReleaseTime = System.currentTimeMillis()
                     lifecycleScope.launch {
-                        kotlinx.coroutines.delay(500)
+                        delay(500)
                         isUserTouchingSlider = false
                     }
                 }
@@ -713,7 +740,7 @@ class MainActivity : AppCompatActivity() {
 
                     volumeDebounceJob?.cancel()
                     volumeDebounceJob = lifecycleScope.launch {
-                        kotlinx.coroutines.delay(150)
+                        delay(150)
                         updateHardwareVolume(latchAndSave = true)
                     }
                 }
@@ -734,8 +761,8 @@ class MainActivity : AppCompatActivity() {
         val alpha = Math.sin(w0) / (2.0 * filter.q)
         val cosW0 = Math.cos(w0)
 
-        var b0 = 0.0; var b1 = 0.0; var b2 = 0.0
-        var a0 = 0.0; var a1 = 0.0; var a2 = 0.0
+        var b0: Double; var b1: Double; var b2: Double
+        var a0: Double; var a1: Double; var a2: Double
 
         when (filter.type) {
             "LS", "HS" -> {
@@ -758,7 +785,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val payload = java.nio.ByteBuffer.allocate(60).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        val payload = ByteBuffer.allocate(60).order(ByteOrder.LITTLE_ENDIAN)
         payload.put(WRITE).put(CMD_PEQ_VALUES).put(0x18.toByte()).put(0x00).put(index.toByte()).put(0x00).put(0x00)
 
         payload.putFloat((b0/a0).toFloat()); payload.putFloat((b1/a0).toFloat()); payload.putFloat((b2/a0).toFloat())
@@ -785,6 +812,7 @@ class MainActivity : AppCompatActivity() {
         commandQueue.trySend(payload)
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun startQueueProcessor() {
         queueProcessorJob?.cancel()
         queueProcessorJob = lifecycleScope.launch(Dispatchers.IO) {
@@ -808,7 +836,7 @@ class MainActivity : AppCompatActivity() {
                     while (result < 0 && retryCount < 3) {
                         result = usbMutex.withLock {
                             if (usbConnection != null) {
-                                connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID.toInt(), interfaceId, buffer, 64, 1000)
+                                connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, buffer, 64, 1000)
                             } else -1
                         }
 
@@ -817,7 +845,7 @@ class MainActivity : AppCompatActivity() {
                             usbMutex.withLock {
                                 usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
                             }
-                            kotlinx.coroutines.delay(50)
+                            delay(50)
                             retryCount++
                         }
                     }
@@ -827,7 +855,7 @@ class MainActivity : AppCompatActivity() {
                         payload.size > 1 && payload[0] == WRITE && payload[1] == CMD_PEQ_VALUES -> 150L
                         else -> 40L
                     }
-                    kotlinx.coroutines.delay(delayTime)
+                    delay(delayTime)
                 } catch (e: Exception) {
                     Log.e("USB", "Queue Crash", e)
                 } finally {
@@ -840,6 +868,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @SuppressLint("NotifyDataSetChanged")
     private fun readDacSettings() {
         if (usbConnection == null) return
         lifecycleScope.launch(Dispatchers.IO) {
@@ -855,7 +884,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
 
                 // 2. Read Gain Mode
                 pullValueSync(CMD_GAIN_MODE, END, 0x00)?.let { data ->
@@ -866,7 +895,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
 
                 // 3. Read Amp Topo
                 pullValueSync(CMD_AMP_TOPO, END, 0x00)?.let { data ->
@@ -877,7 +906,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
 
                 // 4. Read Volume
                 pullValueSync(CMD_GLOBAL_GAIN, END, 0x00)?.let { data ->
@@ -887,33 +916,33 @@ class MainActivity : AppCompatActivity() {
                         volumePercent = Math.round(exactVol).toFloat()
                     }
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
 
                 // 5. Read Mic Gain
                 pullValueSync(CMD_MIC_GAIN, 0x02, 0x02)?.let { data ->
                     val micDb = data[5].toInt().coerceIn(-15, 15)
                     withContext(Dispatchers.Main) {
-                        findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.value = micDb.toFloat()
+                        findViewById<Slider>(R.id.micGainSlider)?.value = micDb.toFloat()
                     }
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
 
                 // 6. Read Balance
                 pullValueSync(CMD_BALANCE, 0x04, 0x01)?.let { data -> // Left
                     val mag = data[6].toInt() and 0xFF
                     dacBalLeft = if (mag > 0) (mag - 256) else 0
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
                 pullValueSync(CMD_BALANCE, 0x04, 0x00)?.let { data -> // Right
                     val mag = data[6].toInt() and 0xFF
                     dacBalRight = if (mag > 0) (256 - mag) else 0
                 }
-                kotlinx.coroutines.delay(60)
+                delay(60)
 
                 val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
                 val finalBal = if (abs(combined) <= 1) 0f else combined.toFloat()
                 withContext(Dispatchers.Main) {
-                    findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.value = finalBal.coerceIn(-15f, 15f)
+                    findViewById<Slider>(R.id.balanceSlider)?.value = finalBal.coerceIn(-15f, 15f)
                 }
 
                 // 7. Read PEQ Bands
@@ -930,17 +959,17 @@ class MainActivity : AppCompatActivity() {
                         activeSlot = data[36]
                         eqBands[i].apply { freq = f; this.q = q; gain = g; type = bandType; enabled = true }
                     }
-                    kotlinx.coroutines.delay(60)
+                    delay(60)
                 }
 
             } finally {
                 isSyncing = false
                 withContext(Dispatchers.Main) {
                     // Re-enable and set UI elements once sync completes
-                    findViewById<com.google.android.material.slider.Slider>(R.id.volumeSlider)?.apply { isEnabled = true; value = volumePercent }
-                    findViewById<com.google.android.material.slider.Slider>(R.id.eqMasterVolume)?.apply { isEnabled = true; value = volumePercent }
-                    findViewById<com.google.android.material.slider.Slider>(R.id.balanceSlider)?.isEnabled = true
-                    findViewById<com.google.android.material.slider.Slider>(R.id.micGainSlider)?.isEnabled = true
+                    findViewById<Slider>(R.id.volumeSlider)?.apply { isEnabled = true; value = volumePercent }
+                    findViewById<Slider>(R.id.eqMasterVolume)?.apply { isEnabled = true; value = volumePercent }
+                    findViewById<Slider>(R.id.balanceSlider)?.isEnabled = true
+                    findViewById<Slider>(R.id.micGainSlider)?.isEnabled = true
 
                     findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
 
@@ -960,7 +989,7 @@ class MainActivity : AppCompatActivity() {
         val magL = if (v < 0) (256 + v) else 0x00
         val magR = if (v > 0) (256 - v) else 0x00
         sendHidCommand(byteArrayOf(WRITE, CMD_BALANCE, 0x04, 0x01, 0x00, magL.toByte()))
-        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+        Handler(Looper.getMainLooper()).postDelayed({
             sendHidCommand(byteArrayOf(WRITE, CMD_BALANCE, 0x04, 0x00, 0x00, magR.toByte()))
             latchSettings()
             debouncedSaveToFlash()
@@ -978,7 +1007,7 @@ class MainActivity : AppCompatActivity() {
             when (intent.action) {
                 // FIX: Automatically catch when the DAC is physically plugged in
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
-                    if (device?.vendorId == VID && device?.productId == PID) {
+                    if (device?.vendorId == VID && device.productId == PID) {
                         Toast.makeText(context, "DAC Hardware Detected", Toast.LENGTH_SHORT).show()
                         startConnectionWatchdog() // Start hunting until permission and data sync are done
                     }
@@ -991,7 +1020,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
-                    if (device?.vendorId == VID && device?.productId == PID) {
+                    if (device?.vendorId == VID && device.productId == PID) {
                         closeUsbConnection()
                     }
                 }
@@ -1022,14 +1051,14 @@ class MainActivity : AppCompatActivity() {
             // 1. Populate UI with current model data
             holder.check.isChecked = band.enabled
             holder.freq.setText(band.freq.toString())
-            holder.gain.setText(String.format(java.util.Locale.US, "%.2f", band.gain))
-            holder.q.setText(String.format(java.util.Locale.US, "%.2f", band.q))
+            holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
+            holder.q.setText(String.format(Locale.US, "%.2f", band.q))
 
             // 2. Fix Dropdown
             val types = arrayOf("PK", "LS", "HS")
             val typeAdapter = ArrayAdapter(holder.itemView.context, android.R.layout.simple_list_item_1, types)
             holder.type.setAdapter(typeAdapter)
-            holder.type.inputType = android.text.InputType.TYPE_NULL
+            holder.type.inputType = InputType.TYPE_NULL
             holder.type.setText(band.type, false)
 
             holder.type.setOnItemClickListener { _, _, pos, _ ->
@@ -1057,26 +1086,26 @@ class MainActivity : AppCompatActivity() {
                     val gInput = holder.gain.text.toString().toFloatOrNull()
                     if (gInput != null && gInput in -10f..10f) {
                         band.gain = Math.round(gInput * 100) / 100f
-                        holder.gain.setText(String.format(java.util.Locale.US, "%.2f", band.gain))
+                        holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
                     } else {
-                        holder.gain.setText(String.format(java.util.Locale.US, "%.2f", band.gain))
+                        holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
                     }
 
                     // Check Q Factor (0.1 to 10.0) and round to 2 decimals
                     val qInput = holder.q.text.toString().toFloatOrNull()
                     if (qInput != null && qInput in 0.1f..10f) {
                         band.q = Math.round(qInput * 100) / 100f
-                        holder.q.setText(String.format(java.util.Locale.US, "%.2f", band.q))
+                        holder.q.setText(String.format(Locale.US, "%.2f", band.q))
                     } else {
-                        holder.q.setText(String.format(java.util.Locale.US, "%.2f", band.q))
+                        holder.q.setText(String.format(Locale.US, "%.2f", band.q))
                     }
 
                     onUpdate(position, band)
-                } catch (e: Exception) {
+                } catch (_: Exception) {
                     // Failsafe
                     holder.freq.setText(band.freq.toString())
-                    holder.gain.setText(String.format(java.util.Locale.US, "%.2f", band.gain))
-                    holder.q.setText(String.format(java.util.Locale.US, "%.2f", band.q))
+                    holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
+                    holder.q.setText(String.format(Locale.US, "%.2f", band.q))
                 }
                 v.clearFocus()
                 false
@@ -1089,6 +1118,8 @@ class MainActivity : AppCompatActivity() {
         override fun getItemCount() = bands.size
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @SuppressLint("NotifyDataSetChanged")
     private fun parseAutoEq(uri: Uri) {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
@@ -1159,9 +1190,9 @@ class MainActivity : AppCompatActivity() {
                     // CRITICAL FIX 3: Bulletproof Deterministic Wait.
                     // Wait until the buffer is empty AND the processor has fully finished execution delays
                     while (!commandQueue.isEmpty || isQueueActive) {
-                        kotlinx.coroutines.delay(50)
+                        delay(50)
                     }
-                    kotlinx.coroutines.delay(100) // Small safety buffer
+                    delay(100) // Small safety buffer
 
                     withContext(Dispatchers.Main) {
                         isMassPushing = false
@@ -1170,14 +1201,14 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 withContext(Dispatchers.Main) {
                     Toast.makeText(this@MainActivity, "File Error: Could not read file", Toast.LENGTH_LONG).show()
                 }
             }
         }
     }
-    private fun saveSettingsToFile(uri: Uri) { /* Keep existing implementation */ }
+    private fun saveSettingsToFile() { /* Keep existing implementation */ }
 
     private fun closeUsbConnection() {
         // 1. Signal all jobs to stop immediately
@@ -1194,7 +1225,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Wait for requestWait(100) in the read thread to naturally time out and release
-                kotlinx.coroutines.delay(150)
+                delay(150)
 
                 connectionToClose?.apply {
                     interfaceToRelease?.let { releaseInterface(it) }
@@ -1219,7 +1250,7 @@ class MainActivity : AppCompatActivity() {
         closeUsbConnection()
         try {
             unregisterReceiver(usbReceiver)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             Log.e("USB", "Receiver already unregistered")
         }
         super.onDestroy()
