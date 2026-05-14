@@ -478,47 +478,33 @@ class MainActivity : AppCompatActivity() {
 
         return usbMutex.withLock {
             try {
-                val inBuffer = ByteArray(64)
-
-                // --- TECHNIQUE 1: PURGE STALE DATA ---
-                // Read until the hardware buffer is empty so we don't pick up old volume/EQ packets
-                var purgeCount = 0
-                while (connection.bulkTransfer(inEndpoint, inBuffer, 64, 2) > 0 && purgeCount < 10) {
-                    purgeCount++
+                val outBuffer = ByteArray(64).apply {
+                    this[0] = REPORT_ID.toByte()
+                    this[1] = READ
+                    this[2] = cmd
+                    this[3] = p1
+                    this[4] = p2
+                    this[5] = p3
                 }
 
-                // --- TECHNIQUE 2: SEND REQUEST ---
-                val outBuffer = ByteArray(64)
-                outBuffer[0] = REPORT_ID.toByte()
-                outBuffer[1] = READ
-                outBuffer[2] = cmd
-                outBuffer[3] = p1
-                outBuffer[4] = p2
-                outBuffer[5] = p3
+                // Clear any leftover packets first
+                val dump = ByteArray(64)
+                while (connection.bulkTransfer(inEndpoint, dump, 64, 2) > 0) { /* flush */ }
 
                 val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, outBuffer, 64, 200)
                 if (writeResult < 0) return@withLock null
 
-                // --- TECHNIQUE 3: COMMAND MATCHING ---
-                // Wait up to 300ms for the SPECIFIC Command ID response
+                val inBuffer = ByteArray(64)
                 val startTime = System.currentTimeMillis()
-                while (System.currentTimeMillis() - startTime < 300) {
+                while (System.currentTimeMillis() - startTime < 400) {
                     val readResult = connection.bulkTransfer(inEndpoint, inBuffer, 64, 50)
-
-                    if (readResult > 0) {
-                        // Only return if the Byte 1 is READ (0x80) and Byte 2 matches our CMD
-                        if (inBuffer[1] == READ && inBuffer[2] == cmd) {
-                            return@withLock inBuffer.copyOf()
-                        }
-                        // If it's a different packet (like an unsolicited volume update), ignore and loop again
+                    if (readResult > 0 && inBuffer[1] == READ && inBuffer[2] == cmd) {
+                        return@withLock inBuffer.copyOf()
                     }
                     delay(5)
                 }
-                null // Timeout
-            } catch (e: Exception) {
-                Log.e("USB", "Read Error: ${e.message}")
                 null
-            }
+            } catch (e: Exception) { null }
         }
     }
 
@@ -831,16 +817,22 @@ class MainActivity : AppCompatActivity() {
         if (recyclerView?.adapter == null) {
             recyclerView?.layoutManager = LinearLayoutManager(this)
             recyclerView?.adapter = EqAdapter(eqBands) { index, band ->
+                // 1. Send to DAC
                 sendFilterUpdate(index, band)
 
-                // Calculate current headroom to ensure the ceiling line stays accurate
+                // 2. SAVE TO PRESET LIST
+                if (presets.indices.contains(currentPresetIndex)) {
+                    presets[currentPresetIndex].bands[index] = band.copy()
+                    savePresetsToPrefs() // Commit to SharedPreferences
+                }
+
+                // 3. Update Headroom & Graph
                 val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
                 val headroomDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
 
-                // Re-find the graph to ensure we aren't using a stale instance
                 findViewById<EqGraphView>(R.id.eqGraph)?.apply {
                     this.preampDb = headroomDb
-                    this.bands = eqBands.map { it.copy() } // Snapshot the list
+                    this.bands = eqBands.map { it.copy() }
                     this.pathDirty = true
                     this.postInvalidate()
                 }
@@ -1168,11 +1160,21 @@ class MainActivity : AppCompatActivity() {
                         val f = rawF.coerceIn(20, 20000)
                         val q = rawQ.coerceIn(0.1f, 10.0f)
                         val gRaw = ((data[32].toInt() and 0xFF) or ((data[33].toInt() and 0xFF) shl 8)).toShort().toInt()
-                        val g = gRaw / 256.0f
+                        var g = gRaw / 256.0f
+
+                        // SNAP LOGIC: Treat gains below 0.25dB as flat zero
+                        if (abs(g) < 0.25f) g = 0.0f
+
                         val bandType = when (data[34].toInt()) { 0x02 -> "PK"; 0x03 -> "LS"; 0x04 -> "HS"; else -> "PK" }
 
                         activeSlot = data[36]
-                        eqBands[i].apply { freq = f; this.q = q; gain = g; type = bandType; enabled = true }
+                        eqBands[i].apply {
+                            freq = f;
+                            this.q = q;
+                            gain = g;
+                            type = bandType;
+                            enabled = (abs(g) > 0.01f) // Auto-disable visually if it's effectively 0
+                        }
                     }
                     delay(60)
                 }
