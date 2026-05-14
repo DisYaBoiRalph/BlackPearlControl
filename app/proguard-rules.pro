@@ -82,3 +82,21 @@
 #
 ## If you use the graph, keep the custom view
 #-keep class com.chesaudio.bpcontrol.EqGraphView { *; }
+
+# 1. Protect the Data Models in MainActivity
+# These are essential for the AutoEQ parser and hardware logic
+-keep class com.chesaudio.bpcontrol.MainActivity$FilterBand { *; }
+-keep class com.chesaudio.bpcontrol.MainActivity$Preset { *; }
+
+# 2. Keep Coroutines and Regex logic intact
+# R8 sometimes over-optimizes the Regex matching used in parseAutoEq
+-keep class kotlinx.coroutines.** { *; }
+-keepnames class ** {
+    @androidx.annotation.Keep <fields>;
+    @androidx.annotation.Keep <methods>;
+}
+
+# 3. Prevent stripping of string-based logic
+-keepclassmembernames class * {
+    java.lang.String *;
+}
