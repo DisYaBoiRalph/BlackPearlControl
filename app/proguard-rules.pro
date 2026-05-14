@@ -75,3 +75,10 @@
 #-keepclasseswithmembernames class * {
 #    native <methods>;
 #}
+
+## Prevent R8 from stripping or renaming your data models
+#-keep class com.chesaudio.bpcontrol.MainActivity$FilterBand { *; }
+#-keep class com.chesaudio.bpcontrol.MainActivity$Preset { *; }
+#
+## If you use the graph, keep the custom view
+#-keep class com.chesaudio.bpcontrol.EqGraphView { *; }
