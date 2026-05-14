@@ -225,6 +225,52 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    private fun showDeletePresetDialog() {
+        // Filter out system presets: "Flat" and "None" should not be deletable
+        val deletablePresets = presets.filter { it.name != "Flat" && it.name != "None" }
+
+        if (deletablePresets.isEmpty()) {
+            Toast.makeText(this, "No user presets to delete", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val names = deletablePresets.map { it.name }.toTypedArray()
+
+        AlertDialog.Builder(this)
+            .setTitle("Delete Preset")
+            .setItems(names) { _, which ->
+                val selectedName = names[which]
+
+                // Double confirmation for safety
+                AlertDialog.Builder(this)
+                    .setTitle("Confirm Deletion")
+                    .setMessage("Are you sure you want to delete '$selectedName'?")
+                    .setPositiveButton("Delete") { _, _ ->
+                        val originalIndex = presets.indexOfFirst { it.name == selectedName }
+                        if (originalIndex != -1) {
+                            presets.removeAt(originalIndex)
+
+                            // Adjust current index so the app doesn't crash or point to the wrong data
+                            if (currentPresetIndex == originalIndex) {
+                                // If we deleted the active preset, default to "Flat" (index 0)
+                                currentPresetIndex = 0
+                                findViewById<Button>(R.id.btnPresets)?.text = presets[0].name
+                            } else if (currentPresetIndex > originalIndex) {
+                                // Shift index down if we deleted something above it in the list
+                                currentPresetIndex--
+                            }
+
+                            savePresetsToPrefs()
+                            Toast.makeText(this, "Preset Deleted", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    .setNegativeButton("Cancel", null)
+                    .show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun debouncedSaveToFlash() {
         // Stop any pending save and schedule a new one after 1 second of silence
         flashHandler.removeCallbacks(flashRunnable)
@@ -871,6 +917,12 @@ class MainActivity : AppCompatActivity() {
             popup.show()
         }
 
+        // --- NEW: Long-Click to Delete Presets ---
+        findViewById<Button>(R.id.btnPresets)?.setOnLongClickListener {
+            showDeletePresetDialog()
+            true
+        }
+
         val eqMasterSlider = findViewById<Slider>(R.id.eqMasterVolume)
         eqMasterSlider?.apply {
             clearOnChangeListeners()
@@ -1306,18 +1358,29 @@ class MainActivity : AppCompatActivity() {
     @OptIn(ExperimentalCoroutinesApi::class)
     @SuppressLint("NotifyDataSetChanged")
     private fun parseAutoEq(uri: Uri) {
+        // 1. SET SYNC FLAG IMMEDIATELY to lock out hardware polling
+        isSyncing = true
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
                     val lines = reader.readLines()
-
                     val tempBands = mutableListOf<FilterBand>()
+                    var parsedPreamp = 0f
 
-                    lines.take(100).forEach { rawLine ->
+                    lines.take(200).forEach { rawLine ->
                         val line = rawLine.trim().uppercase()
 
-                        if (line.startsWith("FILTER") && tempBands.size < 10) {
-                            // CRITICAL FIX 1: Added [:=]? to safely parse colons, equals, or spaces
+                        // --- NEW: Parse Preamp (Crucial for AutoEQ accuracy) ---
+                        if (line.contains("PREAMP")) {
+                            Regex("PREAMP\\s*[:=]?\\s*([-+.\\d]+)").find(line)?.let {
+                                parsedPreamp = it.groupValues[1].toFloatOrNull() ?: 0f
+                            }
+                        }
+
+                        // --- Improved Filter Parser ---
+                        if (line.contains("FILTER") && tempBands.size < 10) {
+                            // Flexible Regex to handle Colons, Equals, or Spaces after labels
                             val fcMatch = Regex("FC\\s*[:=]?\\s*([\\d.]+)").find(line)
                             val gainMatch = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)").find(line)
                             val qMatch = Regex("Q\\s*[:=]?\\s*([\\d.]+)").find(line)
@@ -1326,11 +1389,12 @@ class MainActivity : AppCompatActivity() {
                                 val f = fcMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
                                 val g = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
                                 val q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
-                                val t = if (line.contains("LS")) "LS" else if (line.contains("HS")) "HS" else "PK"
-
-                                // CRITICAL FIX 2: Assume band is ON unless explicitly disabled
+                                val t = when {
+                                    line.contains("LS") -> "LS"
+                                    line.contains("HS") -> "HS"
+                                    else -> "PK"
+                                }
                                 val en = !line.contains("OFF")
-
                                 tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
                             }
                         }
@@ -1338,13 +1402,23 @@ class MainActivity : AppCompatActivity() {
 
                     if (tempBands.isEmpty()) {
                         withContext(Dispatchers.Main) {
-                            Toast.makeText(this@MainActivity, "Error: No valid AutoEQ filters found", Toast.LENGTH_LONG).show()
+                            isSyncing = false // Release lock on failure
+                            Toast.makeText(this@MainActivity, "No valid filters found", Toast.LENGTH_LONG).show()
                         }
                         return@launch
                     }
 
+                    // 2. Update UI and Logic State
                     withContext(Dispatchers.Main) {
                         val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+
+                        // Handle Preamp: AutoEQ preamps are usually negative (e.g. -6dB)
+                        // We translate this to our 0-100% volume slider if possible
+                        if (parsedPreamp < 0) {
+                            // Simple mapping: Adjust master volume to accommodate preamp headroom
+                            volumePercent = (volumePercent + (parsedPreamp * 2)).coerceIn(0f, 100f)
+                        }
+
                         for (i in 0 until 10) {
                             if (i < tempBands.size) {
                                 val src = tempBands[i]
@@ -1353,6 +1427,14 @@ class MainActivity : AppCompatActivity() {
                                 eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
                             }
                         }
+
+                        // Sync to 'None' preset so the Identity System recognizes the import
+                        val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
+                        val nonePreset = presets[noneIdx]
+                        nonePreset.preamp = volumePercent
+                        for (i in 0 until 10) nonePreset.bands[i] = eqBands[i].copy()
+                        currentPresetIndex = noneIdx
+                        findViewById<Button>(R.id.btnPresets)?.text = "None"
 
                         findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
                         findViewById<EqGraphView>(R.id.eqGraph)?.apply {
@@ -1364,31 +1446,28 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
 
-                    isSyncing = true
+                    // 3. Push to Hardware
                     isMassPushing = true
-
                     eqBands.forEachIndexed { index, band ->
                         sendFilterUpdate(index, band, autoLatch = false)
                     }
                     latchSettings()
 
-                    // CRITICAL FIX 3: Bulletproof Deterministic Wait.
-                    // Wait until the buffer is empty AND the processor has fully finished execution delays
-                    while (!commandQueue.isEmpty || isQueueActive) {
-                        delay(50)
-                    }
-                    delay(100) // Small safety buffer
+                    // Wait for processor to finish
+                    while (!commandQueue.isEmpty || isQueueActive) { delay(50) }
+                    delay(100)
 
                     withContext(Dispatchers.Main) {
                         isMassPushing = false
-                        isSyncing = false
+                        isSyncing = false // Release lock
                         debouncedSaveToFlash()
                         Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
                     }
                 }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivity, "File Error: Could not read file", Toast.LENGTH_LONG).show()
+                    isSyncing = false
+                    Toast.makeText(this@MainActivity, "File Error: ${e.message}", Toast.LENGTH_LONG).show()
                 }
             }
         }
