@@ -67,6 +67,15 @@ class MainActivity : AppCompatActivity() {
         var q: Float = 1.0f
     )
 
+    data class Preset(
+        var name: String,
+        var preamp: Float,
+        val bands: MutableList<FilterBand>
+    )
+
+    private var presets = mutableListOf<Preset>()
+    private var currentPresetIndex = 0
+
     // Move these to the top of the class
     private val filterOptions = arrayOf("FAST-LL", "Fast-PC (BEST)", "Slow-LL", "SLOW-PC", "NOS")
     private val gainOptions = arrayOf("LOW", "HIGH")
@@ -163,6 +172,8 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.RECEIVER_NOT_EXPORTED
         )
 
+        loadPresetsFromPrefs()
+
         initUi()
         initEq() // FIX: Build the EQ page once in the background at startup
 
@@ -218,6 +229,105 @@ class MainActivity : AppCompatActivity() {
         // Stop any pending save and schedule a new one after 1 second of silence
         flashHandler.removeCallbacks(flashRunnable)
         flashHandler.postDelayed(flashRunnable, 1000)
+    }
+
+    private fun loadPresetsFromPrefs() {
+        val prefs = getSharedPreferences("BP_PRESETS", Context.MODE_PRIVATE)
+        val jsonStr = prefs.getString("presets_data", null)
+        presets.clear()
+
+        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+
+        if (jsonStr != null) {
+            try {
+                val array = org.json.JSONArray(jsonStr)
+                for (i in 0 until array.length()) {
+                    val pObj = array.getJSONObject(i)
+                    val name = pObj.getString("name")
+                    val preamp = pObj.optDouble("preamp", 0.0).toFloat()
+                    val bArray = pObj.getJSONArray("filters")
+                    val bList = mutableListOf<FilterBand>()
+                    for (b in 0 until 10) {
+                        if (b < bArray.length()) {
+                            val bObj = bArray.getJSONObject(b)
+                            bList.add(FilterBand(
+                                enabled = bObj.getBoolean("enabled"),
+                                type = bObj.getString("type"),
+                                freq = bObj.getInt("freq"),
+                                gain = bObj.getDouble("gain").toFloat(),
+                                q = bObj.getDouble("q").toFloat()
+                            ))
+                        } else {
+                            bList.add(FilterBand(freq = defaultFreqs[b]))
+                        }
+                    }
+                    presets.add(Preset(name, preamp, bList))
+                }
+            } catch (e: Exception) { Log.e("Presets", "JSON Parse Error", e) }
+        }
+
+        // --- Permanent System Presets ---
+        // Ensure "Flat" exists at index 0
+        if (presets.none { it.name == "Flat" }) {
+            val flatBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
+            presets.add(0, Preset("Flat", 0f, flatBands))
+        }
+
+        // Ensure "None" exists (scratchpad for unknown hardware states)
+        if (presets.none { it.name == "None" }) {
+            val noneBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i]) }
+            presets.add(Preset("None", 0f, noneBands))
+        }
+    }
+
+    private fun savePresetsToPrefs() {
+        val prefs = getSharedPreferences("BP_PRESETS", Context.MODE_PRIVATE)
+        val array = org.json.JSONArray()
+        for (p in presets) {
+            val pObj = org.json.JSONObject()
+            pObj.put("name", p.name)
+            pObj.put("preamp", p.preamp.toDouble())
+            val bArray = org.json.JSONArray()
+            for (b in p.bands) {
+                val bObj = org.json.JSONObject()
+                bObj.put("enabled", b.enabled)
+                bObj.put("type", b.type)
+                bObj.put("freq", b.freq)
+                bObj.put("gain", b.gain.toDouble())
+                bObj.put("q", b.q.toDouble())
+                bArray.put(bObj)
+            }
+            pObj.put("filters", bArray)
+            array.put(pObj)
+        }
+        prefs.edit().putString("presets_data", array.toString()).apply()
+    }
+
+    private fun identifyPreset(hwBands: List<FilterBand>): Int {
+        for (i in presets.indices) {
+            if (presets[i].name == "None") continue
+            var match = true
+
+            for (b in 0 until 10) {
+                val hw = hwBands[b]
+                val saved = presets[i].bands[b]
+
+                // Compare effective gains
+                val hwGain = if (hw.enabled) hw.gain else 0f
+                val savedGain = if (saved.enabled) saved.gain else 0f
+
+                if (abs(hwGain - savedGain) > 0.1f) { match = false; break }
+
+                // If the band is active, check specific parameters
+                if (abs(hwGain) > 0.1f || abs(savedGain) > 0.1f) {
+                    if (abs(hw.freq - saved.freq) > 1.0f) { match = false; break }
+                    if (abs(hw.q - saved.q) > 0.05f) { match = false; break }
+                    if (hw.type != saved.type) { match = false; break }
+                }
+            }
+            if (match) return i
+        }
+        return -1
     }
 
     private fun startConnectionWatchdog() {
@@ -322,6 +432,16 @@ class MainActivity : AppCompatActivity() {
 
         return usbMutex.withLock {
             try {
+                val inBuffer = ByteArray(64)
+
+                // --- TECHNIQUE 1: PURGE STALE DATA ---
+                // Read until the hardware buffer is empty so we don't pick up old volume/EQ packets
+                var purgeCount = 0
+                while (connection.bulkTransfer(inEndpoint, inBuffer, 64, 2) > 0 && purgeCount < 10) {
+                    purgeCount++
+                }
+
+                // --- TECHNIQUE 2: SEND REQUEST ---
                 val outBuffer = ByteArray(64)
                 outBuffer[0] = REPORT_ID.toByte()
                 outBuffer[1] = READ
@@ -330,23 +450,27 @@ class MainActivity : AppCompatActivity() {
                 outBuffer[4] = p2
                 outBuffer[5] = p3
 
-                // FIX: Reduced timeout to 100ms. Prevents locking the bus if DAC hangs.
-                val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, outBuffer, 64, 100)
+                val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, outBuffer, 64, 200)
                 if (writeResult < 0) return@withLock null
 
-                val inBuffer = ByteArray(64)
-                (0..3).forEach { _ ->
-                    // FIX: Reduced timeout to 50ms.
+                // --- TECHNIQUE 3: COMMAND MATCHING ---
+                // Wait up to 300ms for the SPECIFIC Command ID response
+                val startTime = System.currentTimeMillis()
+                while (System.currentTimeMillis() - startTime < 300) {
                     val readResult = connection.bulkTransfer(inEndpoint, inBuffer, 64, 50)
 
-                    if (readResult > 0 && inBuffer[1] == READ && inBuffer[2] == cmd) {
-                        return@withLock inBuffer
+                    if (readResult > 0) {
+                        // Only return if the Byte 1 is READ (0x80) and Byte 2 matches our CMD
+                        if (inBuffer[1] == READ && inBuffer[2] == cmd) {
+                            return@withLock inBuffer.copyOf()
+                        }
+                        // If it's a different packet (like an unsolicited volume update), ignore and loop again
                     }
-                    if (readResult > 0) delay(5)
+                    delay(5)
                 }
-                null
+                null // Timeout
             } catch (e: Exception) {
-                Log.e("USB", "Hardware detached mid-read", e)
+                Log.e("USB", "Read Error: ${e.message}")
                 null
             }
         }
@@ -450,15 +574,17 @@ class MainActivity : AppCompatActivity() {
         pollingJob?.cancel()
         pollingJob = lifecycleScope.launch(Dispatchers.IO) {
             while (usbConnection != null) {
+                // Check flags: If we are syncing EQ, back off the volume poller
+                if (!isAppInFocus || isSyncing || isMassPushing || isUserTouchingSlider) {
+                    delay(500) // Longer delay when busy
+                    continue
+                }
+
                 delay(1000)
 
-                // THE GUARD: Do nothing if out of focus, mass pushing, or USER IS TOUCHING SLIDER
-                if (!isAppInFocus || isMassPushing || isUserTouchingSlider) continue
+                // Re-check just before the USB call
+                if (isSyncing || isMassPushing) continue
 
-                // Wait an extra 1000ms after they let go to ensure the DAC saved the setting
-                if (System.currentTimeMillis() - lastSliderReleaseTime < 1000) continue
-
-                // 1. Synchronously ask hardware for volume
                 val response = pullValueSync(CMD_GLOBAL_GAIN, END, 0x00) ?: continue
 
                 // 2. Parse volume safely
@@ -574,8 +700,42 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.btnFactoryReset)?.setOnClickListener {
             AlertDialog.Builder(this)
                 .setTitle("Factory Reset")
-                .setMessage("This will wipe all EQ presets, volume, and hardware settings. Are you sure?")
-                .setPositiveButton("Reset Everything") { _, _ -> performFactoryReset() }
+                .setMessage("Restore all hardware settings and load the Flat EQ profile?")
+                .setPositiveButton("Reset") { _, _ ->
+                    lifecycleScope.launch {
+                        isSyncing = true
+
+                        // 1. Reset Global Settings
+                        volumePercent = 50f
+                        updateHardwareVolume(latchAndSave = false)
+                        sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, 0x01, 0x01, 0x00))
+                        sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, 0x01, 0x00, 0x00))
+                        sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, 0x01, 0x00, 0x00))
+                        updateBalance(0)
+
+                        // 2. Load and Apply the Permanent "Flat" Preset
+                        val flatIdx = presets.indexOfFirst { it.name == "Flat" }.coerceAtLeast(0)
+                        currentPresetIndex = flatIdx
+                        val flatPreset = presets[flatIdx]
+
+                        eqBands.forEachIndexed { i, band ->
+                            val src = flatPreset.bands[i]
+                            band.apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
+                            sendFilterUpdate(i, band, autoLatch = false)
+                        }
+
+                        latchSettings()
+                        saveToFlash()
+                        isSyncing = false
+
+                        // Refresh UI
+                        findViewById<Button>(R.id.btnPresets)?.text = "Flat"
+                        findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
+                        findViewById<EqGraphView>(R.id.eqGraph)?.postInvalidate()
+
+                        Toast.makeText(this@MainActivity, "System Flat", Toast.LENGTH_SHORT).show()
+                    }
+                }
                 .setNegativeButton("Cancel", null)
                 .show()
         }
@@ -643,65 +803,67 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.btnPresets)?.setOnClickListener { view ->
             val popup = PopupMenu(this@MainActivity, view)
-            popup.menu.add("Flat EQ (Reset)")
-            popup.menu.add("Bass Boost")
-            popup.menu.add("V-Shape")
-            popup.menu.add("Treble Boost")
+
+            // 1. Show existing presets
+            presets.forEachIndexed { index, preset ->
+                popup.menu.add(0, index, index, preset.name)
+            }
+
+            // 2. Add 'Save New' option
+            popup.menu.add(1, 999, presets.size, "+ Save as New Preset")
 
             popup.setOnMenuItemClickListener { item ->
-                // FIX 1: ALWAYS start from a flat baseline so old presets don't bleed over
-                val freqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-                eqBands.forEachIndexed { i, band ->
-                    band.enabled = true; band.gain = 0f; band.q = 1.0f; band.type = "PK"; band.freq = freqs[i]
-                }
+                if (item.itemId == 999) {
+                    // Show dialog to name new preset
+                    val input = EditText(this)
+                    AlertDialog.Builder(this)
+                        .setTitle("New Preset")
+                        .setView(input)
+                        .setPositiveButton("Save") { _, _ ->
+                            val name = input.text.toString()
+                            if (name.isNotBlank()) {
+                                val clonedBands = eqBands.map { it.copy() }.toMutableList()
+                                presets.add(Preset(name, volumePercent, clonedBands))
+                                currentPresetIndex = presets.size - 1
+                                savePresetsToPrefs()
+                                findViewById<Button>(R.id.btnPresets)?.text = name
+                            }
+                        }
+                        .setNegativeButton("Cancel", null).show()
+                } else {
+                    // Load the selected preset
+                    currentPresetIndex = item.itemId
+                    val selected = presets[currentPresetIndex]
+                    findViewById<Button>(R.id.btnPresets)?.text = selected.name
 
-                when (item.title) {
-                    "Flat EQ (Reset)" -> { /* Already flat */ }
-                    "Bass Boost" -> {
-                        eqBands[0].apply { gain = 6f; type = "LS"; freq = 63 }
-                        eqBands[1].apply { gain = 3f; type = "PK"; freq = 125 }
-                    }
-                    "V-Shape" -> {
-                        eqBands[0].apply { gain = 5f; type = "LS"; freq = 63 }
-                        eqBands[1].apply { gain = 2f; type = "PK"; freq = 125 }
-                        eqBands[8].apply { gain = 3f; type = "PK"; freq = 8000 }
-                        eqBands[9].apply { gain = 5f; type = "HS"; freq = 16000 }
-                    }
-                    "Treble Boost" -> {
-                        eqBands[8].apply { gain = 3f; type = "PK"; freq = 8000 }
-                        eqBands[9].apply { gain = 5f; type = "HS"; freq = 16000 }
-                    }
-                }
-
-                isSyncing = true
-                findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
-                findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                    this.bands = eqBands.map { it.copy() }
-                    pathDirty = true
-                    postInvalidate()
-                }
-
-                lifecycleScope.launch(Dispatchers.IO) {
-                    isMassPushing = true
-
-                    // Instantly push all 10 to the queue
-                    eqBands.forEachIndexed { index, band ->
-                        sendFilterUpdate(index, band, autoLatch = false)
+                    eqBands.forEachIndexed { i, band ->
+                        val src = selected.bands[i]
+                        band.apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
                     }
 
-                    // Queue the latch at the very end
-                    latchSettings()
+                    // Trigger hardware update
+                    lifecycleScope.launch(Dispatchers.IO) {
+                        isMassPushing = true
+                        eqBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
+                        latchSettings()
+                        while (!commandQueue.isEmpty || isQueueActive) { delay(50) }
+                        withContext(Dispatchers.Main) {
+                            isMassPushing = false
+                            debouncedSaveToFlash()
 
-                    // FIX 2: Bulletproof Deterministic Wait instead of guessing 1.6 seconds.
-                    while (!commandQueue.isEmpty || isQueueActive) {
-                        delay(50)
-                    }
-                    delay(100) // Small safety buffer
+                            // Refresh list
+                            findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
 
-                    withContext(Dispatchers.Main) {
-                        isMassPushing = false
-                        isSyncing = false
-                        debouncedSaveToFlash()
+                            // Update Graph with new snapshot and headroom
+                            findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                                this.bands = eqBands.map { it.copy() }
+                                val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+                                this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
+                                this.pathDirty = true
+                                this.postInvalidate()
+                            }
+                            Toast.makeText(this@MainActivity, "Preset Loaded: ${selected.name}", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 }
                 true
@@ -851,9 +1013,10 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     val delayTime = when {
-                        payload.size > 1 && payload[1] == CMD_FLASH_EQ -> 500L
-                        payload.size > 1 && payload[0] == WRITE && payload[1] == CMD_PEQ_VALUES -> 150L
-                        else -> 40L
+                        payload[1] == CMD_FLASH_EQ -> 600L     // Writing to internal flash takes time
+                        payload[1] == CMD_PEQ_VALUES -> 180L   // MCU needs time to calculate coefficients
+                        payload[1] == CMD_GLOBAL_GAIN -> 60L    // Simple volume is fast
+                        else -> 50L
                     }
                     delay(delayTime)
                 } catch (e: Exception) {
@@ -963,9 +1126,30 @@ class MainActivity : AppCompatActivity() {
                 }
 
             } finally {
-                isSyncing = false
+                // --- PEQ IDENTITY LOGIC ---
+                // 1. Identify if hardware matches a known preset
+                val matchIdx = identifyPreset(eqBands)
+
                 withContext(Dispatchers.Main) {
-                    // Re-enable and set UI elements once sync completes
+                    if (matchIdx != -1) {
+                        currentPresetIndex = matchIdx
+                    } else {
+                        // 2. No match? Load into "None" preset index
+                        val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
+                        val nonePreset = presets[noneIdx]
+
+                        // Update the 'None' data structure with what we just read from hardware
+                        nonePreset.preamp = volumePercent // Use the hardware volume we just read
+                        for (i in 0 until 10) {
+                            nonePreset.bands[i] = eqBands[i].copy()
+                        }
+                        currentPresetIndex = noneIdx
+                    }
+
+                    // 3. UI Updates
+                    findViewById<Button>(R.id.btnPresets)?.text = presets[currentPresetIndex].name
+
+                    // Re-enable and set UI elements
                     findViewById<Slider>(R.id.volumeSlider)?.apply { isEnabled = true; value = volumePercent }
                     findViewById<Slider>(R.id.eqMasterVolume)?.apply { isEnabled = true; value = volumePercent }
                     findViewById<Slider>(R.id.balanceSlider)?.isEnabled = true
@@ -975,11 +1159,12 @@ class MainActivity : AppCompatActivity() {
 
                     findViewById<EqGraphView>(R.id.eqGraph)?.apply {
                         this.bands = eqBands.map { it.copy() }
-                        val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-                        this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
-                        this.pathDirty = true
-                        this.postInvalidate()
+                        pathDirty = true
+                        postInvalidate()
                     }
+
+                    // Release the sync flag LAST
+                    isSyncing = false
                 }
             }
         }
