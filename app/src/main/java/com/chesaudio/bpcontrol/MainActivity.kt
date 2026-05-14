@@ -1396,27 +1396,37 @@ class MainActivity : AppCompatActivity() {
                     val tempBands = mutableListOf<FilterBand>()
                     var parsedPreamp = 0f
 
-                    lines.take(200).forEach { rawLine ->
-                        val line = rawLine.trim().uppercase()
+                    // CRITICAL FIX: Pre-compile Regex outside the loop.
+                    // Bypasses R8 loop-hoisting bugs and drastically improves CPU performance.
+                    val preampRegex = Regex("PREAMP\\s*[:=]?\\s*([-+.\\d]+)")
+                    val fcRegex = Regex("FC\\s*[:=]?\\s*([\\d.]+)")
+                    val gainRegex = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)")
+                    val qRegex = Regex("Q\\s*[:=]?\\s*([\\d.]+)")
 
-                        // --- NEW: Parse Preamp (Crucial for AutoEQ accuracy) ---
+                    // Standard for-loop is safer against R8 bytecode mangling than lambdas
+                    val maxLines = minOf(lines.size, 200)
+                    for (i in 0 until maxLines) {
+                        val line = lines[i].trim().uppercase()
+
+                        // --- Parse Preamp ---
                         if (line.contains("PREAMP")) {
-                            Regex("PREAMP\\s*[:=]?\\s*([-+.\\d]+)").find(line)?.let {
-                                parsedPreamp = it.groupValues[1].toFloatOrNull() ?: 0f
+                            preampRegex.find(line)?.let {
+                                parsedPreamp = it.groupValues.getOrNull(1)?.toFloatOrNull() ?: 0f
                             }
                         }
 
-                        // --- Improved Filter Parser ---
+                        // --- Parse Filter ---
                         if (line.contains("FILTER") && tempBands.size < 10) {
-                            // Flexible Regex to handle Colons, Equals, or Spaces after labels
-                            val fcMatch = Regex("FC\\s*[:=]?\\s*([\\d.]+)").find(line)
-                            val gainMatch = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)").find(line)
-                            val qMatch = Regex("Q\\s*[:=]?\\s*([\\d.]+)").find(line)
+                            val fcMatch = fcRegex.find(line)
+                            val gainMatch = gainRegex.find(line)
+                            val qMatch = qRegex.find(line)
 
                             if (fcMatch != null) {
-                                val f = fcMatch.groupValues[1].toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
-                                val g = gainMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
-                                val q = qMatch?.groupValues?.get(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
+                                // .getOrNull(1) prevents IndexOutOfBounds crashes if R8 strips capture groups
+                                val f = fcMatch.groupValues.getOrNull(1)?.toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
+                                val g = gainMatch?.groupValues?.getOrNull(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
+                                val q = qMatch?.groupValues?.getOrNull(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
+
                                 val t = when {
                                     line.contains("LS") -> "LS"
                                     line.contains("HS") -> "HS"
