@@ -14,8 +14,8 @@ android {
         applicationId = "com.chesaudio.bpcontrol"
         minSdk = 24
         targetSdk = 36
-        versionCode = 3
-        versionName = "0.1.3"
+        versionCode = 4
+        versionName = "0.1.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
