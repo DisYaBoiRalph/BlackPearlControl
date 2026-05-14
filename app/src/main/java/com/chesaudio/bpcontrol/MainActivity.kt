@@ -225,6 +225,12 @@ class MainActivity : AppCompatActivity() {
         super.onPause()
     }
 
+    private fun calculateHeadroomDb(volPercent: Float): Float {
+        val currentRaw = (VOL_MIN_RAW + (volPercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+        val clampedRaw = currentRaw.coerceIn(VOL_MIN_RAW, VOL_MAX_RAW)
+        return (VOL_MAX_RAW - clampedRaw).toFloat() / 256f
+    }
+
     private fun showDeletePresetDialog() {
         // Filter out system presets: "Flat" and "None" should not be deletable
         val deletablePresets = presets.filter { it.name != "Flat" && it.name != "None" }
@@ -412,13 +418,18 @@ class MainActivity : AppCompatActivity() {
 
             // 3. Clear EQ List & Graph
             eqBands.forEach { it.enabled = false; it.gain = 0f }
+            // ... inside readDacSettings() -> finally -> withContext(Dispatchers.Main)
             findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
+
             findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                this.bands = eqBands.map { it.copy() } // FIX: Pass the zeroed-out data to clear the graph
+                this.bands = eqBands.map { it.copy() }
+                // NEW: Calculate and set the graph ceiling based on the freshly synced hardware volume
+                this.preampDb = calculateHeadroomDb(volumePercent)
                 pathDirty = true
                 postInvalidate()
             }
 
+            // Release the sync flag LAST
             isSyncing = false
         }
     }
@@ -627,13 +638,22 @@ class MainActivity : AppCompatActivity() {
                 val roundedVol = Math.round(exactVol).toFloat()
 
                 // 3. Apply to UI safely
-                if (abs(volumePercent - roundedVol) >= 1.0f) {
-                    volumePercent = roundedVol
-                    withContext(Dispatchers.Main) {
-                        // Double check interlock right before UI update
-                        if (!isUserTouchingSlider) {
-                            findViewById<Slider>(R.id.volumeSlider)?.value = volumePercent
-                            findViewById<Slider>(R.id.eqMasterVolume)?.value = volumePercent
+                if (abs(volumePercent - roundedVol) >= 1.0f) {// 3. Apply to UI safely
+                    if (abs(volumePercent - roundedVol) >= 1.0f) {
+                        volumePercent = roundedVol
+                        withContext(Dispatchers.Main) {
+                            // Double check interlock right before UI update
+                            if (!isUserTouchingSlider) {
+                                findViewById<Slider>(R.id.volumeSlider)?.value = volumePercent
+                                findViewById<Slider>(R.id.eqMasterVolume)?.value = volumePercent
+
+                                // NEW: Keep graph ceiling in sync with live hardware volume changes
+                                findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                                    this.preampDb = calculateHeadroomDb(volumePercent)
+                                    this.pathDirty = true
+                                    this.postInvalidate()
+                                }
+                            }
                         }
                     }
                 }
@@ -807,12 +827,15 @@ class MainActivity : AppCompatActivity() {
         val graph = findViewById<EqGraphView>(R.id.eqGraph)
 
         // Fix for "stuck" line: Correct Headroom math for startup
+        // Fix for "stuck" line: Correct Headroom math for startup
         val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-        graph?.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
 
-        // Pass a COPY of the bands to the graph.
-        // Direct references crash when the background sync modifies values during a draw.
-        graph?.bands = eqBands.map { it.copy() }
+        graph?.apply {
+            this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
+            this.bands = eqBands.map { it.copy() }
+            this.pathDirty = true
+            this.postInvalidate() // CRITICAL: Force the UI to actually draw the line on launch
+        }
 
         if (recyclerView?.adapter == null) {
             recyclerView?.layoutManager = LinearLayoutManager(this)
@@ -1213,8 +1236,11 @@ class MainActivity : AppCompatActivity() {
 
                     findViewById<EqGraphView>(R.id.eqGraph)?.apply {
                         this.bands = eqBands.map { it.copy() }
-                        pathDirty = true
-                        postInvalidate()
+                        // CRITICAL: Hydrate the graph ceiling with the newly synced hardware volume
+                        val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+                        this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
+                        this.pathDirty = true
+                        this.postInvalidate()
                     }
 
                     // Release the sync flag LAST
