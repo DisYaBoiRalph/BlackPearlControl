@@ -59,36 +59,26 @@ class EqAdapter(
         }
 
         val updateAction = TextView.OnEditorActionListener { v, _, _ ->
-            try {
-                val fInput = holder.freq.text.toString().toIntOrNull()
-                if (fInput != null && fInput in 20..20000) {
-                    band.freq = fInput
-                } else {
-                    holder.freq.setText(band.freq.toString())
-                }
-
-                val gInput = holder.gain.text.toString().toFloatOrNull()
-                if (gInput != null && gInput in -10f..10f) {
-                    band.gain = Math.round(gInput * 100) / 100f
-                    holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-                } else {
-                    holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-                }
-
-                val qInput = holder.q.text.toString().toFloatOrNull()
-                if (qInput != null && qInput in 0.1f..10f) {
-                    band.q = Math.round(qInput * 100) / 100f
-                    holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-                } else {
-                    holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-                }
-
-                onUpdate(position, band)
-            } catch (_: Exception) {
+            val fInput = holder.freq.text.toString().toIntOrNull()
+            if (fInput != null && fInput in 20..20000) {
+                band.freq = fInput
+            } else {
                 holder.freq.setText(band.freq.toString())
-                holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-                holder.q.setText(String.format(Locale.US, "%.2f", band.q))
             }
+
+            val gInput = holder.gain.text.toString().toFloatOrNull()
+            if (gInput != null && gInput in -10f..10f) {
+                band.gain = Math.round(gInput * 100) / 100f
+            }
+            holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
+
+            val qInput = holder.q.text.toString().toFloatOrNull()
+            if (qInput != null && qInput in 0.1f..10f) {
+                band.q = Math.round(qInput * 100) / 100f
+            }
+            holder.q.setText(String.format(Locale.US, "%.2f", band.q))
+
+            onUpdate(position, band)
             v.clearFocus()
             false
         }

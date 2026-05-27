@@ -350,48 +350,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun performFactoryReset() {
-        if (usbConnection == null) {
-            Toast.makeText(this, "DAC not connected", Toast.LENGTH_SHORT).show()
-            return
-        }
-
-        lifecycleScope.launch {
-            isSyncing = true
-
-            // 1. Reset Global Settings to Hardware Defaults
-            volumePercent = 50f
-            updateHardwareVolume(latchAndSave = false)
-
-            // Filter: Fast-LL (1), Gain: Low (0), Amp: Class H (0), Balance: 0
-            sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
-            sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
-            sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
-            updateBalance(0)
-
-            // 2. Reset EQ Bands to Flat
-            val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-            eqBands.forEachIndexed { i, band ->
-                band.apply {
-                    enabled = true; type = "PK"; freq = defaultFreqs[i]; gain = 0f; q = 1.0f
-                }
-                // FIX: Pass autoLatch = false to prevent queue flooding
-                sendFilterUpdate(i, band, autoLatch = false)
-                delay(40)
-            }
-
-            // 3. Commit to Flash
-            latchSettings()
-            saveToFlash()
-
-            isSyncing = false
-
-            // 4. Force a fresh UI sync from the hardware to confirm
-            readDacSettings()
-            Toast.makeText(this@MainActivity, "Factory Reset Complete", Toast.LENGTH_LONG).show()
-        }
-    }
-
     private fun saveToFlash() {
         if (usbConnection == null) return
         sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
@@ -453,7 +411,10 @@ class MainActivity : AppCompatActivity() {
                     delay(BlackPearlProtocol.Timing.READ_POLL_INTERVAL_MS)
                 }
                 null
-            } catch (e: Exception) { null }
+            } catch (e: Exception) {
+                Log.e("USB", "Read command failed for cmd=${cmd.toUByte().toString(16)}", e)
+                null
+            }
         }
     }
 
@@ -1329,6 +1290,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
             } catch (e: Exception) {
+                Log.e("AutoEQ", "Import parsing failed", e)
                 withContext(Dispatchers.Main) {
                     isSyncing = false
                     Toast.makeText(this@MainActivity, "File Error: ${e.message}", Toast.LENGTH_LONG).show()
@@ -1353,7 +1315,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 // Wait for requestWait(100) in the read thread to naturally time out and release
-                delay(150)
+                delay(BlackPearlProtocol.Timing.USB_CLOSE_DELAY_MS)
 
                 connectionToClose?.apply {
                     interfaceToRelease?.let { releaseInterface(it) }
@@ -1378,8 +1340,8 @@ class MainActivity : AppCompatActivity() {
         closeUsbConnection()
         try {
             unregisterReceiver(usbReceiver)
-        } catch (_: Exception) {
-            Log.e("USB", "Receiver already unregistered")
+        } catch (e: IllegalArgumentException) {
+            Log.w("USB", "Receiver already unregistered", e)
         }
         super.onDestroy()
     }

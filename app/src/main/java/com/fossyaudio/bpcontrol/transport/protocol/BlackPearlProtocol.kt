@@ -114,5 +114,6 @@ object BlackPearlProtocol {
         const val MASS_PUSH_POLL_DELAY_MS = 50L
         const val MASS_PUSH_SETTLE_DELAY_MS = 100L
         const val BALANCE_PAIR_DELAY_MS = 50L
+        const val USB_CLOSE_DELAY_MS = 150L
     }
 }
