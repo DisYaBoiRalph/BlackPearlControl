@@ -104,6 +104,8 @@ object BlackPearlProtocol {
         const val READ_POLL_TIMEOUT_MS = 50
         const val READ_POLL_INTERVAL_MS = 5L
         const val SETTINGS_READ_STEP_DELAY_MS = 60L
+        const val VOLUME_POLL_BUSY_DELAY_MS = 500L
+        const val VOLUME_POLL_INTERVAL_MS = 1000L
 
         const val CONNECTION_WATCHDOG_INTERVAL_MS = 1500L
         const val USB_SETTLE_DELAY_MS = 300L

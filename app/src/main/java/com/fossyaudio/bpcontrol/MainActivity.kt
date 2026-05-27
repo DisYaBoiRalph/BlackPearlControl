@@ -43,6 +43,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.slider.Slider
 import com.fossyaudio.bpcontrol.data.PresetRepository
 import com.fossyaudio.bpcontrol.di.AppContainer
+import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.presentation.MainPresentationCoordinator
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
@@ -94,6 +95,9 @@ class MainActivity : AppCompatActivity() {
     private val VOL_MAX_RAW = 6440
     private val presentationCoordinator by lazy {
         MainPresentationCoordinator(VOL_MIN_RAW, VOL_MAX_RAW)
+    }
+    private val dacSettingsMapper by lazy {
+        DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW)
     }
 
     private var isUserTouchingSlider = false
@@ -553,44 +557,32 @@ class MainActivity : AppCompatActivity() {
             while (usbConnection != null) {
                 // Check flags: If we are syncing EQ, back off the volume poller
                 if (!isAppInFocus || isSyncing || isMassPushing || isUserTouchingSlider) {
-                    delay(500) // Longer delay when busy
+                    delay(BlackPearlProtocol.Timing.VOLUME_POLL_BUSY_DELAY_MS) // Longer delay when busy
                     continue
                 }
 
-                delay(1000)
+                delay(BlackPearlProtocol.Timing.VOLUME_POLL_INTERVAL_MS)
 
                 // Re-check just before the USB call
                 if (isSyncing || isMassPushing) continue
 
                 val response = pullValueSync(CMD_GLOBAL_GAIN, END, END) ?: continue
-
-                // 2. Parse volume safely
-                val rawVol = BlackPearlCodec.readSigned16LE(
-                    response,
-                    BlackPearlProtocol.ParserOffset.VALUE_LSB,
-                    BlackPearlProtocol.ParserOffset.VALUE_MSB
-                )
-                if (rawVol == 0 && response[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() == 0) continue // Ignore garbage
-
-                val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
-                val roundedVol = Math.round(exactVol).toFloat()
+                val roundedVol = dacSettingsMapper.parseVolumePercentOrNull(response) ?: continue
 
                 // 3. Apply to UI safely
-                if (abs(volumePercent - roundedVol) >= 1.0f) {// 3. Apply to UI safely
-                    if (abs(volumePercent - roundedVol) >= 1.0f) {
-                        volumePercent = roundedVol
-                        withContext(Dispatchers.Main) {
-                            // Double check interlock right before UI update
-                            if (!isUserTouchingSlider) {
-                                findViewById<Slider>(R.id.volumeSlider)?.value = volumePercent
-                                findViewById<Slider>(R.id.eqMasterVolume)?.value = volumePercent
+                if (abs(volumePercent - roundedVol) >= 1.0f) {
+                    volumePercent = roundedVol
+                    withContext(Dispatchers.Main) {
+                        // Double check interlock right before UI update
+                        if (!isUserTouchingSlider) {
+                            findViewById<Slider>(R.id.volumeSlider)?.value = volumePercent
+                            findViewById<Slider>(R.id.eqMasterVolume)?.value = volumePercent
 
-                                // NEW: Keep graph ceiling in sync with live hardware volume changes
-                                findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                                    this.preampDb = calculateHeadroomDb(volumePercent)
-                                    this.pathDirty = true
-                                    this.postInvalidate()
-                                }
+                            // NEW: Keep graph ceiling in sync with live hardware volume changes
+                            findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                                this.preampDb = calculateHeadroomDb(volumePercent)
+                                this.pathDirty = true
+                                this.postInvalidate()
                             }
                         }
                     }
@@ -1044,14 +1036,8 @@ class MainActivity : AppCompatActivity() {
 
                 // 4. Read Volume
                 pullValueSync(CMD_GLOBAL_GAIN, END, END)?.let { data ->
-                    val rawVol = BlackPearlCodec.readSigned16LE(
-                        data,
-                        BlackPearlProtocol.ParserOffset.VALUE_LSB,
-                        BlackPearlProtocol.ParserOffset.VALUE_MSB
-                    )
-                    if (!(rawVol == 0 && data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() == 0)) { // Ignore garbage
-                        val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
-                        volumePercent = Math.round(exactVol).toFloat()
+                    dacSettingsMapper.parseVolumePercentOrNull(data)?.let { parsedVolume ->
+                        volumePercent = parsedVolume
                     }
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
@@ -1062,7 +1048,7 @@ class MainActivity : AppCompatActivity() {
                     BlackPearlProtocol.Param.MIC_GAIN_PAGE,
                     BlackPearlProtocol.Param.MIC_GAIN_PAGE
                 )?.let { data ->
-                    val micDb = data[BlackPearlProtocol.ParserOffset.VALUE_MSB].toInt().coerceIn(-15, 15)
+                    val micDb = dacSettingsMapper.parseMicGainDb(data)
                     withContext(Dispatchers.Main) {
                         findViewById<Slider>(R.id.micGainSlider)?.value = micDb.toFloat()
                     }
@@ -1071,12 +1057,12 @@ class MainActivity : AppCompatActivity() {
 
                 // 6. Read Balance
                 pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, BlackPearlProtocol.Param.BALANCE_LEFT)?.let { data -> // Left
-                    val mag = data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() and 0xFF
+                    val mag = dacSettingsMapper.parseBalanceMagnitude(data)
                     dacBalLeft = if (mag > 0) (mag - 256) else 0
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
                 pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, BlackPearlProtocol.Param.BALANCE_RIGHT)?.let { data -> // Right
-                    val mag = data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() and 0xFF
+                    val mag = dacSettingsMapper.parseBalanceMagnitude(data)
                     dacBalRight = if (mag > 0) (256 - mag) else 0
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
@@ -1090,37 +1076,14 @@ class MainActivity : AppCompatActivity() {
                 // 7. Read PEQ Bands
                 for (i in 0 until 10) {
                     pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
-                        val rawF = BlackPearlCodec.readUnsigned16LE(
-                            data,
-                            BlackPearlProtocol.ParserOffset.PEQ_FREQ_LSB,
-                            BlackPearlProtocol.ParserOffset.PEQ_FREQ_MSB
-                        )
-                        val rawQ = BlackPearlCodec.readUnsigned16LE(
-                            data,
-                            BlackPearlProtocol.ParserOffset.PEQ_Q_LSB,
-                            BlackPearlProtocol.ParserOffset.PEQ_Q_MSB
-                        ) / 256.0f
-                        val f = rawF.coerceIn(20, 20000)
-                        val q = rawQ.coerceIn(0.1f, 10.0f)
-                        val gRaw = BlackPearlCodec.readSigned16LE(
-                            data,
-                            BlackPearlProtocol.ParserOffset.PEQ_GAIN_LSB,
-                            BlackPearlProtocol.ParserOffset.PEQ_GAIN_MSB
-                        )
-                        var g = gRaw / 256.0f
-
-                        // SNAP LOGIC: Treat gains below 0.25dB as flat zero
-                        if (abs(g) < 0.25f) g = 0.0f
-
-                        val bandType = BlackPearlProtocol.FilterType.nameOf(data[BlackPearlProtocol.ParserOffset.PEQ_TYPE].toInt())
-
-                        activeSlot = data[BlackPearlProtocol.ParserOffset.PEQ_ACTIVE_SLOT]
+                        val parsedBand = dacSettingsMapper.parsePeqBand(data)
+                        activeSlot = parsedBand.activeSlot
                         eqBands[i].apply {
-                            freq = f;
-                            this.q = q;
-                            gain = g;
-                            type = bandType;
-                            enabled = (abs(g) > 0.01f) // Auto-disable visually if it's effectively 0
+                            freq = parsedBand.freq
+                            q = parsedBand.q
+                            gain = parsedBand.gain
+                            type = parsedBand.type
+                            enabled = parsedBand.enabled
                         }
                     }
                     delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
