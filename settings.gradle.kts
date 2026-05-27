@@ -24,3 +24,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Black Pearl Control"
 include(":app")
+include(":shared")
