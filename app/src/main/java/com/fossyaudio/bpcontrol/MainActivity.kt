@@ -158,9 +158,16 @@ class MainActivity : AppCompatActivity() {
         appContainer = AppContainer(this)
         usbManager = getSystemService(USB_SERVICE) as UsbManager
         presetRepository = appContainer.presetRepository
+        val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottom_navigation)
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
+            v.setPadding(systemBars.left, systemBars.top, systemBars.right, 0)
+            bottomNavigation?.setPadding(
+                bottomNavigation.paddingLeft,
+                bottomNavigation.paddingTop,
+                bottomNavigation.paddingRight,
+                systemBars.bottom
+            )
             insets
         }
 
@@ -188,7 +195,7 @@ class MainActivity : AppCompatActivity() {
         findViewById<Slider>(R.id.balanceSlider)?.isEnabled = false
         findViewById<Slider>(R.id.micGainSlider)?.isEnabled = false
 
-        findViewById<BottomNavigationView>(R.id.bottom_navigation)?.setOnItemSelectedListener { item ->
+        bottomNavigation?.setOnItemSelectedListener { item ->
             when (item.itemId) {
                 R.id.nav_settings -> {
                     findViewById<View>(R.id.settingsContainer)?.visibility = View.VISIBLE
