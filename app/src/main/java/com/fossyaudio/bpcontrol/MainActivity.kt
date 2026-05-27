@@ -47,6 +47,8 @@ import com.fossyaudio.bpcontrol.presentation.MainPresentationCoordinator
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
+import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import com.fossyaudio.bpcontrol.transport.usb.UsbCommandQueueProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -56,8 +58,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import java.util.Locale
 import kotlin.math.abs
 
@@ -74,25 +74,24 @@ class MainActivity : AppCompatActivity() {
 
     private val usbMutex = Mutex() // CRITICAL: Prevents thread collision kernel panics
 
-    private val VID = 0x3302
-    private val PID = 0x43E8
-    private val REPORT_ID = 0x4B
-    private val WRITE = 0x01.toByte()
-    private val READ = 0x80.toByte()
-    private val END = 0x00.toByte()
+    private val VID = BlackPearlProtocol.Device.VID
+    private val PID = BlackPearlProtocol.Device.PID
+    private val REPORT_ID = BlackPearlProtocol.Device.REPORT_ID
+    private val WRITE = BlackPearlProtocol.Frame.WRITE
+    private val READ = BlackPearlProtocol.Frame.READ
+    private val END = BlackPearlProtocol.Frame.END
 
-    private val CMD_GLOBAL_GAIN = 0x03.toByte()
-    private val CMD_FILTER = 0x11.toByte()
-    private val CMD_MIC_GAIN = 0x02.toByte()
-    private val CMD_GAIN_MODE = 0x19.toByte()
-    private val CMD_AMP_TOPO = 0x1D.toByte()
-    private val CMD_BALANCE = 0x16.toByte()
-    private val CMD_PEQ_VALUES = 0x09.toByte()
-    private val CMD_FLASH_EQ = 0x01.toByte()
+    private val CMD_GLOBAL_GAIN = BlackPearlProtocol.Command.GLOBAL_GAIN
+    private val CMD_FILTER = BlackPearlProtocol.Command.FILTER
+    private val CMD_MIC_GAIN = BlackPearlProtocol.Command.MIC_GAIN
+    private val CMD_GAIN_MODE = BlackPearlProtocol.Command.GAIN_MODE
+    private val CMD_AMP_TOPO = BlackPearlProtocol.Command.AMP_TOPO
+    private val CMD_BALANCE = BlackPearlProtocol.Command.BALANCE
+    private val CMD_PEQ_VALUES = BlackPearlProtocol.Command.PEQ_VALUES
+    private val CMD_FLASH_EQ = BlackPearlProtocol.Command.FLASH_EQ
 
     private val VOL_MIN_RAW = -9472
     private val VOL_MAX_RAW = 6440
-    private val TYPE_CODES = mapOf("PK" to 0x02.toByte(), "LS" to 0x03.toByte(), "HS" to 0x04.toByte())
     private val presentationCoordinator by lazy {
         MainPresentationCoordinator(VOL_MIN_RAW, VOL_MAX_RAW)
     }
@@ -105,11 +104,11 @@ class MainActivity : AppCompatActivity() {
     private var isMassPushing = false
     private var dacBalLeft = 0   // Track Left side attenuation
     private var dacBalRight = 0
-    private var activeSlot: Byte = 0x00 // Required to unlock Flash Saving
+    private var activeSlot: Byte = END // Required to unlock Flash Saving
 
     private val usbCommandQueueProcessor by lazy {
         UsbCommandQueueProcessor(
-            reportId = REPORT_ID.toByte(),
+            reportId = REPORT_ID,
             cmdFlashEq = CMD_FLASH_EQ,
             cmdPeqValues = CMD_PEQ_VALUES,
             cmdGlobalGain = CMD_GLOBAL_GAIN,
@@ -301,7 +300,7 @@ class MainActivity : AppCompatActivity() {
             // Keep trying every 1.5s until a hardware connection is established
             while (usbConnection == null && isAppInFocus) {
                 findAndConnect()
-                delay(1500)
+                delay(BlackPearlProtocol.Timing.CONNECTION_WATCHDOG_INTERVAL_MS)
                 if (usbConnection != null) {
                     Log.d("USB", "Watchdog: Connection successful.")
                     break
@@ -361,9 +360,9 @@ class MainActivity : AppCompatActivity() {
             updateHardwareVolume(latchAndSave = false)
 
             // Filter: Fast-LL (1), Gain: Low (0), Amp: Class H (0), Balance: 0
-            sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, 0x01, 0x01, 0x00))
-            sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, 0x01, 0x00, 0x00))
-            sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, 0x01, 0x00, 0x00))
+            sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
+            sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
+            sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
             updateBalance(0)
 
             // 2. Reset EQ Bands to Flat
@@ -391,41 +390,63 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveToFlash() {
         if (usbConnection == null) return
-        sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, 0x01, END))
+        sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
     }
 
     // Added 'suspend' keyword to allow locking
-    private suspend fun pullValueSync(cmd: Byte, p1: Byte = 0x00, p2: Byte = 0x00, p3: Byte = 0x00): ByteArray? {
+    private suspend fun pullValueSync(
+        cmd: Byte,
+        p1: Byte = BlackPearlProtocol.Frame.END,
+        p2: Byte = BlackPearlProtocol.Frame.END,
+        p3: Byte = BlackPearlProtocol.Frame.END
+    ): ByteArray? {
         val connection = usbConnection ?: return null
         val interfaceId = usbInterface?.id ?: 0
         val inEndpoint = endpointIn ?: return null
 
         return usbMutex.withLock {
             try {
-                val outBuffer = ByteArray(64).apply {
-                    this[0] = REPORT_ID.toByte()
-                    this[1] = READ
-                    this[2] = cmd
-                    this[3] = p1
-                    this[4] = p2
-                    this[5] = p3
-                }
+                val outBuffer = BlackPearlCodec.encodeReadRequest(cmd, p1, p2, p3)
 
                 // Clear any leftover packets first
-                val dump = ByteArray(64)
-                while (connection.bulkTransfer(inEndpoint, dump, 64, 2) > 0) { /* flush */ }
+                val dump = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
+                while (
+                    connection.bulkTransfer(
+                        inEndpoint,
+                        dump,
+                        BlackPearlProtocol.Frame.REPORT_SIZE,
+                        BlackPearlProtocol.Timing.READ_FLUSH_TIMEOUT_MS
+                    ) > 0
+                ) { /* flush */ }
 
-                val writeResult = connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, outBuffer, 64, 200)
+                val writeResult = connection.controlTransfer(
+                    BlackPearlProtocol.Transfer.REQUEST_TYPE_CLASS_INTERFACE_OUT,
+                    BlackPearlProtocol.Transfer.REQUEST_SET_REPORT,
+                    BlackPearlProtocol.Transfer.VALUE_OUTPUT_REPORT_BASE or REPORT_ID.toInt(),
+                    interfaceId,
+                    outBuffer,
+                    BlackPearlProtocol.Frame.REPORT_SIZE,
+                    BlackPearlProtocol.Timing.READ_TRANSFER_TIMEOUT_MS
+                )
                 if (writeResult < 0) return@withLock null
 
-                val inBuffer = ByteArray(64)
+                val inBuffer = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
                 val startTime = System.currentTimeMillis()
-                while (System.currentTimeMillis() - startTime < 400) {
-                    val readResult = connection.bulkTransfer(inEndpoint, inBuffer, 64, 50)
-                    if (readResult > 0 && inBuffer[1] == READ && inBuffer[2] == cmd) {
+                while (System.currentTimeMillis() - startTime < BlackPearlProtocol.Timing.READ_WINDOW_MS) {
+                    val readResult = connection.bulkTransfer(
+                        inEndpoint,
+                        inBuffer,
+                        BlackPearlProtocol.Frame.REPORT_SIZE,
+                        BlackPearlProtocol.Timing.READ_POLL_TIMEOUT_MS
+                    )
+                    if (
+                        readResult > 0 &&
+                        inBuffer[BlackPearlProtocol.ParserOffset.DIRECTION] == READ &&
+                        inBuffer[BlackPearlProtocol.ParserOffset.COMMAND] == cmd
+                    ) {
                         return@withLock inBuffer.copyOf()
                     }
-                    delay(5)
+                    delay(BlackPearlProtocol.Timing.READ_POLL_INTERVAL_MS)
                 }
                 null
             } catch (e: Exception) { null }
@@ -477,7 +498,7 @@ class MainActivity : AppCompatActivity() {
             if (intf == null) intf = device.getInterface(device.interfaceCount - 1)
 
             // Non-blocking wait for ALSA to settle
-            delay(300)
+            delay(BlackPearlProtocol.Timing.USB_SETTLE_DELAY_MS)
 
             var claimed = false
             for (i: Int in 1..3) {
@@ -485,7 +506,7 @@ class MainActivity : AppCompatActivity() {
                     claimed = true
                     break
                 }
-                delay(150) // Non-blocking delay
+                delay(BlackPearlProtocol.Timing.CLAIM_RETRY_DELAY_MS) // Non-blocking delay
             }
 
             if (claimed) {
@@ -519,7 +540,7 @@ class MainActivity : AppCompatActivity() {
 
 
                 // Final sync once hardware is ready
-                delay(500)
+                delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
                 readDacSettings()
                 startVolumePolling()
             }
@@ -541,11 +562,15 @@ class MainActivity : AppCompatActivity() {
                 // Re-check just before the USB call
                 if (isSyncing || isMassPushing) continue
 
-                val response = pullValueSync(CMD_GLOBAL_GAIN, END, 0x00) ?: continue
+                val response = pullValueSync(CMD_GLOBAL_GAIN, END, END) ?: continue
 
                 // 2. Parse volume safely
-                val rawVol = ((response[4].toInt() and 0xFF) or ((response[5].toInt() and 0xFF) shl 8)).toShort().toInt()
-                if (rawVol == 0 && response[6].toInt() == 0) continue // Ignore garbage
+                val rawVol = BlackPearlCodec.readSigned16LE(
+                    response,
+                    BlackPearlProtocol.ParserOffset.VALUE_LSB,
+                    BlackPearlProtocol.ParserOffset.VALUE_MSB
+                )
+                if (rawVol == 0 && response[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() == 0) continue // Ignore garbage
 
                 val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
                 val roundedVol = Math.round(exactVol).toFloat()
@@ -582,7 +607,15 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_NULL
             setOnItemClickListener { _, _, position, _ ->
                 if (!isSyncing) {
-                    sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, 0x01, (position + 1).toByte(), 0x00))
+                    sendHidCommand(
+                        byteArrayOf(
+                            WRITE,
+                            CMD_FILTER,
+                            BlackPearlProtocol.Frame.BASE_DATA_LENGTH,
+                            (position + 1).toByte(),
+                            END
+                        )
+                    )
                     debouncedSaveToFlash()
                 }
             }
@@ -593,7 +626,15 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_NULL
             setOnItemClickListener { _, _, position, _ ->
                 if (!isSyncing) {
-                    sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, 0x01, position.toByte(), 0x00))
+                    sendHidCommand(
+                        byteArrayOf(
+                            WRITE,
+                            CMD_GAIN_MODE,
+                            BlackPearlProtocol.Frame.BASE_DATA_LENGTH,
+                            position.toByte(),
+                            END
+                        )
+                    )
                     debouncedSaveToFlash()
                 }
             }
@@ -604,7 +645,15 @@ class MainActivity : AppCompatActivity() {
             inputType = InputType.TYPE_NULL
             setOnItemClickListener { _, _, position, _ ->
                 if (!isSyncing) {
-                    sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, 0x01, position.toByte(), 0x00))
+                    sendHidCommand(
+                        byteArrayOf(
+                            WRITE,
+                            CMD_AMP_TOPO,
+                            BlackPearlProtocol.Frame.BASE_DATA_LENGTH,
+                            position.toByte(),
+                            END
+                        )
+                    )
                     debouncedSaveToFlash()
                 }
             }
@@ -654,7 +703,15 @@ class MainActivity : AppCompatActivity() {
             valueFrom = -15f; valueTo = 15f; stepSize = 1f
             addOnChangeListener { _, value, fromUser ->
                 if (fromUser) {
-                    sendHidCommand(byteArrayOf(WRITE, CMD_MIC_GAIN, 0x02, 0x80.toByte(), (value.toInt() and 0xFF).toByte()))
+                    sendHidCommand(
+                        byteArrayOf(
+                            WRITE,
+                            CMD_MIC_GAIN,
+                            BlackPearlProtocol.Param.MIC_GAIN_LENGTH,
+                            BlackPearlProtocol.Param.MIC_GAIN_SIGNED_FLAG,
+                            (value.toInt() and 0xFF).toByte()
+                        )
+                    )
                     latchSettings()
                     debouncedSaveToFlash()
                 }
@@ -673,9 +730,17 @@ class MainActivity : AppCompatActivity() {
                         // 1. Reset Global Settings
                         volumePercent = 50f
                         updateHardwareVolume(latchAndSave = false)
-                        sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, 0x01, 0x01, 0x00))
-                        sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, 0x01, 0x00, 0x00))
-                        sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, 0x01, 0x00, 0x00))
+                        sendHidCommand(
+                            byteArrayOf(
+                                WRITE,
+                                CMD_FILTER,
+                                BlackPearlProtocol.Frame.BASE_DATA_LENGTH,
+                                BlackPearlProtocol.Frame.BASE_DATA_LENGTH,
+                                END
+                            )
+                        )
+                        sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
+                        sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
                         updateBalance(0)
 
                         // 2. Load and Apply the Permanent "Flat" Preset
@@ -712,7 +777,16 @@ class MainActivity : AppCompatActivity() {
         val totalRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
         val clampedRaw = totalRaw.coerceIn(VOL_MIN_RAW, VOL_MAX_RAW)
 
-        sendHidCommand(byteArrayOf(WRITE, CMD_GLOBAL_GAIN, 0x03, (clampedRaw and 0xFF).toByte(), (clampedRaw shr 8).toByte(), 0x00))
+        sendHidCommand(
+            byteArrayOf(
+                WRITE,
+                CMD_GLOBAL_GAIN,
+                BlackPearlProtocol.Param.GLOBAL_GAIN_LENGTH,
+                (clampedRaw and 0xFF).toByte(),
+                (clampedRaw shr 8).toByte(),
+                END
+            )
+        )
 
         if (latchAndSave) {
             latchSettings()
@@ -820,7 +894,7 @@ class MainActivity : AppCompatActivity() {
                         isMassPushing = true
                         eqBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
                         latchSettings()
-                        while (usbCommandQueueProcessor.hasPendingWork()) { delay(50) }
+                        while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
                         withContext(Dispatchers.Main) {
                             isMassPushing = false
                             debouncedSaveToFlash()
@@ -898,21 +972,14 @@ class MainActivity : AppCompatActivity() {
         val effectiveGain = if (filter.enabled) filter.gain else 0f
         val effectiveFilter = filter.copy(gain = effectiveGain)
         val coeffs = BiquadMath.coefficients(effectiveFilter, effectiveGain)
-
-        val payload = ByteBuffer.allocate(60).order(ByteOrder.LITTLE_ENDIAN)
-        payload.put(WRITE).put(CMD_PEQ_VALUES).put(0x18.toByte()).put(0x00).put(index.toByte()).put(0x00).put(0x00)
-
-        payload.putFloat(coeffs.b0); payload.putFloat(coeffs.b1); payload.putFloat(coeffs.b2)
-        payload.putFloat(coeffs.a1); payload.putFloat(coeffs.a2)
-
-        payload.putShort(filter.freq.toShort())
-        payload.putShort((filter.q * 256).toInt().toShort())
-        // FIX: Send effectiveGain (0 when off) instead of the raw slider value
-        payload.putShort((effectiveGain * 256).toInt().toShort())
-        payload.put(TYPE_CODES[filter.type] ?: 0x02)
-        payload.put(0x00.toByte()).put(activeSlot).put(END)
-
-        sendHidCommand(payload.array())
+        sendHidCommand(
+            BlackPearlCodec.encodePeqUpdate(
+                index = index,
+                filter = effectiveFilter,
+                coeffs = coeffs,
+                activeSlot = activeSlot
+            )
+        )
 
         // FIX: Only latch and save if we aren't in the middle of a mass update
         if (autoLatch) {
@@ -943,68 +1010,76 @@ class MainActivity : AppCompatActivity() {
                 isSyncing = true
 
                 // 1. Read Filter
-                pullValueSync(CMD_FILTER, END, 0x00)?.let { data ->
-                    val value = data[4].toInt()
+                pullValueSync(CMD_FILTER, END, END)?.let { data ->
+                    val value = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
                     withContext(Dispatchers.Main) {
                         filterOptions.getOrNull(value - 1)?.let { text ->
                             findViewById<AutoCompleteTextView>(R.id.filterSelector)?.setText(text, false)
                         }
                     }
                 }
-                delay(60)
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 2. Read Gain Mode
-                pullValueSync(CMD_GAIN_MODE, END, 0x00)?.let { data ->
-                    val value = data[4].toInt()
+                pullValueSync(CMD_GAIN_MODE, END, END)?.let { data ->
+                    val value = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
                     withContext(Dispatchers.Main) {
                         gainOptions.getOrNull(value)?.let { text ->
                             findViewById<AutoCompleteTextView>(R.id.gainSelector)?.setText(text, false)
                         }
                     }
                 }
-                delay(60)
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 3. Read Amp Topo
-                pullValueSync(CMD_AMP_TOPO, END, 0x00)?.let { data ->
-                    val value = data[4].toInt()
+                pullValueSync(CMD_AMP_TOPO, END, END)?.let { data ->
+                    val value = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
                     withContext(Dispatchers.Main) {
                         ampOptions.getOrNull(value)?.let { text ->
                             findViewById<AutoCompleteTextView>(R.id.ampSelector)?.setText(text, false)
                         }
                     }
                 }
-                delay(60)
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 4. Read Volume
-                pullValueSync(CMD_GLOBAL_GAIN, END, 0x00)?.let { data ->
-                    val rawVol = ((data[4].toInt() and 0xFF) or ((data[5].toInt() and 0xFF) shl 8)).toShort().toInt()
-                    if (!(rawVol == 0 && data[6].toInt() == 0)) { // Ignore garbage
+                pullValueSync(CMD_GLOBAL_GAIN, END, END)?.let { data ->
+                    val rawVol = BlackPearlCodec.readSigned16LE(
+                        data,
+                        BlackPearlProtocol.ParserOffset.VALUE_LSB,
+                        BlackPearlProtocol.ParserOffset.VALUE_MSB
+                    )
+                    if (!(rawVol == 0 && data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() == 0)) { // Ignore garbage
                         val exactVol = ((rawVol - VOL_MIN_RAW).toFloat() / (VOL_MAX_RAW - VOL_MIN_RAW).toFloat() * 100).coerceIn(0f, 100f)
                         volumePercent = Math.round(exactVol).toFloat()
                     }
                 }
-                delay(60)
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 5. Read Mic Gain
-                pullValueSync(CMD_MIC_GAIN, 0x02, 0x02)?.let { data ->
-                    val micDb = data[5].toInt().coerceIn(-15, 15)
+                pullValueSync(
+                    CMD_MIC_GAIN,
+                    BlackPearlProtocol.Param.MIC_GAIN_PAGE,
+                    BlackPearlProtocol.Param.MIC_GAIN_PAGE
+                )?.let { data ->
+                    val micDb = data[BlackPearlProtocol.ParserOffset.VALUE_MSB].toInt().coerceIn(-15, 15)
                     withContext(Dispatchers.Main) {
                         findViewById<Slider>(R.id.micGainSlider)?.value = micDb.toFloat()
                     }
                 }
-                delay(60)
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 6. Read Balance
-                pullValueSync(CMD_BALANCE, 0x04, 0x01)?.let { data -> // Left
-                    val mag = data[6].toInt() and 0xFF
+                pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, BlackPearlProtocol.Param.BALANCE_LEFT)?.let { data -> // Left
+                    val mag = data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() and 0xFF
                     dacBalLeft = if (mag > 0) (mag - 256) else 0
                 }
-                delay(60)
-                pullValueSync(CMD_BALANCE, 0x04, 0x00)?.let { data -> // Right
-                    val mag = data[6].toInt() and 0xFF
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
+                pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, BlackPearlProtocol.Param.BALANCE_RIGHT)?.let { data -> // Right
+                    val mag = data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt() and 0xFF
                     dacBalRight = if (mag > 0) (256 - mag) else 0
                 }
-                delay(60)
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
                 val finalBal = if (abs(combined) <= 1) 0f else combined.toFloat()
@@ -1014,20 +1089,32 @@ class MainActivity : AppCompatActivity() {
 
                 // 7. Read PEQ Bands
                 for (i in 0 until 10) {
-                    pullValueSync(CMD_PEQ_VALUES, 0x00, 0x00, i.toByte())?.let { data ->
-                        val rawF = (data[28].toInt() and 0xFF) or ((data[29].toInt() and 0xFF) shl 8)
-                        val rawQ = ((data[30].toInt() and 0xFF) or ((data[31].toInt() and 0xFF) shl 8)) / 256.0f
+                    pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
+                        val rawF = BlackPearlCodec.readUnsigned16LE(
+                            data,
+                            BlackPearlProtocol.ParserOffset.PEQ_FREQ_LSB,
+                            BlackPearlProtocol.ParserOffset.PEQ_FREQ_MSB
+                        )
+                        val rawQ = BlackPearlCodec.readUnsigned16LE(
+                            data,
+                            BlackPearlProtocol.ParserOffset.PEQ_Q_LSB,
+                            BlackPearlProtocol.ParserOffset.PEQ_Q_MSB
+                        ) / 256.0f
                         val f = rawF.coerceIn(20, 20000)
                         val q = rawQ.coerceIn(0.1f, 10.0f)
-                        val gRaw = ((data[32].toInt() and 0xFF) or ((data[33].toInt() and 0xFF) shl 8)).toShort().toInt()
+                        val gRaw = BlackPearlCodec.readSigned16LE(
+                            data,
+                            BlackPearlProtocol.ParserOffset.PEQ_GAIN_LSB,
+                            BlackPearlProtocol.ParserOffset.PEQ_GAIN_MSB
+                        )
                         var g = gRaw / 256.0f
 
                         // SNAP LOGIC: Treat gains below 0.25dB as flat zero
                         if (abs(g) < 0.25f) g = 0.0f
 
-                        val bandType = when (data[34].toInt()) { 0x02 -> "PK"; 0x03 -> "LS"; 0x04 -> "HS"; else -> "PK" }
+                        val bandType = BlackPearlProtocol.FilterType.nameOf(data[BlackPearlProtocol.ParserOffset.PEQ_TYPE].toInt())
 
-                        activeSlot = data[36]
+                        activeSlot = data[BlackPearlProtocol.ParserOffset.PEQ_ACTIVE_SLOT]
                         eqBands[i].apply {
                             freq = f;
                             this.q = q;
@@ -1036,7 +1123,7 @@ class MainActivity : AppCompatActivity() {
                             enabled = (abs(g) > 0.01f) // Auto-disable visually if it's effectively 0
                         }
                     }
-                    delay(60)
+                    delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
                 }
 
             } finally {
@@ -1088,18 +1175,47 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateBalance(v: Int) {
-        val magL = if (v < 0) (256 + v) else 0x00
-        val magR = if (v > 0) (256 - v) else 0x00
-        sendHidCommand(byteArrayOf(WRITE, CMD_BALANCE, 0x04, 0x01, 0x00, magL.toByte()))
+        val magL = if (v < 0) (256 + v) else END.toInt()
+        val magR = if (v > 0) (256 - v) else END.toInt()
+        sendHidCommand(
+            byteArrayOf(
+                WRITE,
+                CMD_BALANCE,
+                BlackPearlProtocol.Param.BALANCE_LENGTH,
+                BlackPearlProtocol.Param.BALANCE_LEFT,
+                END,
+                magL.toByte()
+            )
+        )
         Handler(Looper.getMainLooper()).postDelayed({
-            sendHidCommand(byteArrayOf(WRITE, CMD_BALANCE, 0x04, 0x00, 0x00, magR.toByte()))
+            sendHidCommand(
+                byteArrayOf(
+                    WRITE,
+                    CMD_BALANCE,
+                    BlackPearlProtocol.Param.BALANCE_LENGTH,
+                    BlackPearlProtocol.Param.BALANCE_RIGHT,
+                    END,
+                    magR.toByte()
+                )
+            )
             latchSettings()
             debouncedSaveToFlash()
-        }, 50)
+        }, BlackPearlProtocol.Timing.BALANCE_PAIR_DELAY_MS)
     }
 
     private fun latchSettings() {
-        sendHidCommand(byteArrayOf(WRITE, 0x0A.toByte(), 0x04, 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0x00))
+        sendHidCommand(
+            byteArrayOf(
+                WRITE,
+                BlackPearlProtocol.Command.LATCH_SETTINGS,
+                BlackPearlProtocol.Param.BALANCE_LENGTH,
+                BlackPearlProtocol.Frame.FILL,
+                BlackPearlProtocol.Frame.FILL,
+                BlackPearlProtocol.Frame.FILL,
+                BlackPearlProtocol.Frame.FILL,
+                END
+            )
+        )
     }
 
     // Update the receiver to listen for NEW attachments
@@ -1239,8 +1355,8 @@ class MainActivity : AppCompatActivity() {
                     latchSettings()
 
                     // Wait for processor to finish
-                    while (usbCommandQueueProcessor.hasPendingWork()) { delay(50) }
-                    delay(100)
+                    while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
+                    delay(BlackPearlProtocol.Timing.MASS_PUSH_SETTLE_DELAY_MS)
 
                     withContext(Dispatchers.Main) {
                         isMassPushing = false

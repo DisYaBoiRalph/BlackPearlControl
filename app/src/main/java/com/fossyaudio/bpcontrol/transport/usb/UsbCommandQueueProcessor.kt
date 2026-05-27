@@ -2,6 +2,7 @@ package com.fossyaudio.bpcontrol.transport.usb
 
 import android.hardware.usb.UsbDeviceConnection
 import android.util.Log
+import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -21,7 +22,7 @@ class UsbCommandQueueProcessor(
     private val usbMutex: Mutex
 ) {
     private val commandQueue = Channel<ByteArray>(
-        capacity = 100,
+        capacity = BlackPearlProtocol.Timing.QUEUE_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     private var processorJob: Job? = null
@@ -58,17 +59,25 @@ class UsbCommandQueueProcessor(
                 }
 
                 try {
-                    val buffer = ByteArray(64)
+                    val buffer = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
                     buffer[0] = reportId
-                    System.arraycopy(payload, 0, buffer, 1, payload.size.coerceAtMost(63))
+                    System.arraycopy(payload, 0, buffer, 1, payload.size.coerceAtMost(BlackPearlProtocol.Frame.QUEUED_PAYLOAD_MAX_SIZE))
                     val interfaceId = interfaceIdProvider()
 
                     var result = -1
                     var retryCount = 0
-                    while (result < 0 && retryCount < 3) {
+                    while (result < 0 && retryCount < BlackPearlProtocol.Timing.QUEUE_RETRY_COUNT) {
                         result = usbMutex.withLock {
                             if (connectionProvider() != null) {
-                                connection.controlTransfer(0x21, 0x09, 0x0200 or reportId.toInt(), interfaceId, buffer, 64, 1000)
+                                connection.controlTransfer(
+                                    BlackPearlProtocol.Transfer.REQUEST_TYPE_CLASS_INTERFACE_OUT,
+                                    BlackPearlProtocol.Transfer.REQUEST_SET_REPORT,
+                                    BlackPearlProtocol.Transfer.VALUE_OUTPUT_REPORT_BASE or reportId.toInt(),
+                                    interfaceId,
+                                    buffer,
+                                    BlackPearlProtocol.Frame.REPORT_SIZE,
+                                    BlackPearlProtocol.Timing.QUEUE_TRANSFER_TIMEOUT_MS
+                                )
                             } else {
                                 -1
                             }
@@ -77,18 +86,29 @@ class UsbCommandQueueProcessor(
                         if (result < 0) {
                             Log.e("USB", "Transfer Failed. Attempting Clear Halt and Retry...")
                             usbMutex.withLock {
-                                connectionProvider()?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
+                                connectionProvider()?.controlTransfer(
+                                    BlackPearlProtocol.Transfer.REQUEST_TYPE_STANDARD_ENDPOINT_OUT,
+                                    BlackPearlProtocol.Transfer.REQUEST_CLEAR_FEATURE,
+                                    BlackPearlProtocol.Transfer.FEATURE_ENDPOINT_HALT,
+                                    interfaceId,
+                                    null,
+                                    0,
+                                    BlackPearlProtocol.Timing.QUEUE_CLEAR_HALT_TIMEOUT_MS
+                                )
                             }
-                            delay(50)
+                            delay(BlackPearlProtocol.Timing.QUEUE_RETRY_DELAY_MS)
                             retryCount++
                         }
                     }
 
                     val delayTime = when {
-                        payload[1] == cmdFlashEq -> 600L
-                        payload[1] == cmdPeqValues -> 180L
-                        payload[1] == cmdGlobalGain -> 60L
-                        else -> 50L
+                        payload.size > BlackPearlProtocol.ParserOffset.DIRECTION &&
+                            payload[BlackPearlProtocol.ParserOffset.DIRECTION] == cmdFlashEq -> BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS
+                        payload.size > BlackPearlProtocol.ParserOffset.DIRECTION &&
+                            payload[BlackPearlProtocol.ParserOffset.DIRECTION] == cmdPeqValues -> BlackPearlProtocol.Timing.QUEUE_DELAY_PEQ_MS
+                        payload.size > BlackPearlProtocol.ParserOffset.DIRECTION &&
+                            payload[BlackPearlProtocol.ParserOffset.DIRECTION] == cmdGlobalGain -> BlackPearlProtocol.Timing.QUEUE_DELAY_GLOBAL_GAIN_MS
+                        else -> BlackPearlProtocol.Timing.QUEUE_DELAY_DEFAULT_MS
                     }
                     delay(delayTime)
                 } catch (e: Exception) {
