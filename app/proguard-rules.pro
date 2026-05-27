@@ -11,15 +11,15 @@
 # ------------------------------------------------------------------
 # Protects the data classes from being mangled. Since you rely on
 # .copy() and manual JSON parsing, it's safest to keep the signatures intact.
--keep class com.chesaudio.bpcontrol.MainActivity$FilterBand { *; }
--keep class com.chesaudio.bpcontrol.MainActivity$Preset { *; }
+-keep class com.fossyaudio.bpcontrol.shared.model.FilterBand { *; }
+-keep class com.fossyaudio.bpcontrol.shared.model.Preset { *; }
 
 # ------------------------------------------------------------------
 # 3. CUSTOM VIEWS (CRITICAL FOR XML INFLATION)
 # ------------------------------------------------------------------
 # If R8 obfuscates the name of your custom graph view, the layout inflater
 # will throw a ClassNotFoundException on app launch.
--keep public class com.chesaudio.bpcontrol.EqGraphView {
+-keep public class com.fossyaudio.bpcontrol.EqGraphView {
     public <init>(android.content.Context);
     public <init>(android.content.Context, android.util.AttributeSet);
     public <init>(android.content.Context, android.util.AttributeSet, int);
@@ -29,6 +29,6 @@
 # 4. RECYCLERVIEW ADAPTER SAFETY
 # ------------------------------------------------------------------
 # Prevents R8 from aggressively stripping View references inside your ViewHolder.
--keepclassmembers class com.chesaudio.bpcontrol.MainActivity$EqAdapter$ViewHolder {
+-keepclassmembers class com.fossyaudio.bpcontrol.EqAdapter$ViewHolder {
     <fields>;
 }

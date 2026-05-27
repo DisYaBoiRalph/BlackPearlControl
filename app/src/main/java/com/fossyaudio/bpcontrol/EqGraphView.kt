@@ -1,9 +1,11 @@
-package com.chesaudio.bpcontrol
+package com.fossyaudio.bpcontrol
 
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
 import android.view.View
+import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
+import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import kotlin.math.*
 
 class EqGraphView(context: Context, attrs: AttributeSet) : View(context, attrs) {
@@ -21,7 +23,7 @@ class EqGraphView(context: Context, attrs: AttributeSet) : View(context, attrs) 
     }
 
     var preampDb: Float = 0f
-    var bands: List<MainActivity.FilterBand> = emptyList()
+    var bands: List<FilterBand> = emptyList()
 
     private val cachedPath = Path()
     var pathDirty = true
@@ -95,7 +97,7 @@ class EqGraphView(context: Context, attrs: AttributeSet) : View(context, attrs) 
                 val freq = freqForX(x.toFloat()).coerceAtMost(22000.0)
                 var totalGainDb = 0.0
                 for (band in bands) {
-                    if (band.enabled) totalGainDb += calculateBiquadMagnitude(freq, band)
+                    if (band.enabled) totalGainDb += BiquadMath.magnitudeDb(freq, band)
                 }
 
                 // Sanitize coordinates to prevent native hardware renderer crashes (no NaN or Infinity)
@@ -107,59 +109,5 @@ class EqGraphView(context: Context, attrs: AttributeSet) : View(context, attrs) 
             pathDirty = false
         }
         canvas.drawPath(cachedPath, paint)
-    }
-
-    private fun calculateBiquadMagnitude(f: Double, band: MainActivity.FilterBand): Double {
-        val f0 = band.freq.toDouble()
-        val gain = band.gain.toDouble()
-        val q = band.q.toDouble()
-        val fs = 48000.0
-
-        if (kotlin.math.abs(gain) < 0.1) return 0.0
-
-        // Accurate Biquad Transfer Function Magnitude
-        val w0 = 2.0 * Math.PI * f0 / fs
-        val alpha = Math.sin(w0) / (2.0 * q)
-        val a_val = Math.pow(10.0, gain / 40.0)
-        val cosW0 = Math.cos(w0)
-
-        var b0 = 0.0; var b1 = 0.0; var b2 = 0.0
-        var a0 = 0.0; var a1 = 0.0; var a2 = 0.0
-
-        when (band.type) {
-            "LS", "HS" -> {
-                val s = if (band.type == "HS") 1.0 else -1.0
-                val sqA = Math.sqrt(a_val)
-                b0 = a_val * ((a_val + 1.0) + s * (a_val - 1.0) * cosW0 + 2.0 * sqA * alpha)
-                b1 = -s * 2.0 * a_val * ((a_val - 1.0) + s * (a_val + 1.0) * cosW0)
-                b2 = a_val * ((a_val + 1.0) + s * (a_val - 1.0) * cosW0 - 2.0 * sqA * alpha)
-                a0 = (a_val + 1.0) - s * (a_val - 1.0) * cosW0 + 2.0 * sqA * alpha
-                a1 = s * 2.0 * ((a_val - 1.0) - s * (a_val + 1.0) * cosW0)
-                a2 = (a_val + 1.0) - s * (a_val - 1.0) * cosW0 - 2.0 * sqA * alpha
-            }
-            else -> { // "PK"
-                b0 = 1.0 + alpha * a_val
-                b1 = -2.0 * cosW0
-                b2 = 1.0 - alpha * a_val
-                a0 = 1.0 + alpha / a_val
-                a1 = -2.0 * cosW0
-                a2 = 1.0 - alpha / a_val
-            }
-        }
-
-        val w = 2.0 * Math.PI * f / fs
-        val numRe = b0 + b1 * Math.cos(w) + b2 * Math.cos(2.0 * w)
-        val numIm = -(b1 * Math.sin(w) + b2 * Math.sin(2.0 * w))
-        val denRe = a0 + a1 * Math.cos(w) + a2 * Math.cos(2.0 * w)
-        val denIm = -(a1 * Math.sin(w) + a2 * Math.sin(2.0 * w))
-
-        val denominator = denRe * denRe + denIm * denIm
-        // Sanity check: If denominator is 0, the math is broken. Return 0dB to prevent a crash.
-        if (denominator == 0.0) return 0.0
-
-        val magSquared = (numRe * numRe + numIm * numIm) / denominator
-        val result = 10.0 * kotlin.math.log10(kotlin.math.max(1e-10, magSquared))
-
-        return if (result.isNaN() || result.isInfinite()) 0.0 else result
     }
 }

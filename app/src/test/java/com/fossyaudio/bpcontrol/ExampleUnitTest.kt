@@ -1,4 +1,4 @@
-package com.chesaudio.bpcontrol
+package com.fossyaudio.bpcontrol
 
 import org.junit.Test
 

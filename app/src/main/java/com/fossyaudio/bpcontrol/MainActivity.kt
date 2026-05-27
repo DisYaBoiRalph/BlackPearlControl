@@ -1,4 +1,4 @@
-package com.chesaudio.bpcontrol
+package com.fossyaudio.bpcontrol
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
@@ -41,11 +41,16 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.slider.Slider
+import com.fossyaudio.bpcontrol.data.PresetRepository
+import com.fossyaudio.bpcontrol.di.AppContainer
+import com.fossyaudio.bpcontrol.presentation.MainPresentationCoordinator
+import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
+import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.transport.usb.UsbCommandQueueProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -58,20 +63,6 @@ import kotlin.math.abs
 
 @Suppress("DEPRECATION")
 class MainActivity : AppCompatActivity() {
-
-    data class FilterBand(
-        var enabled: Boolean = true,
-        var type: String = "PK",
-        var freq: Int = 1000,
-        var gain: Float = 0.0f,
-        var q: Float = 1.0f
-    )
-
-    data class Preset(
-        var name: String,
-        var preamp: Float,
-        val bands: MutableList<FilterBand>
-    )
 
     private var presets = mutableListOf<Preset>()
     private var currentPresetIndex = 0
@@ -102,6 +93,9 @@ class MainActivity : AppCompatActivity() {
     private val VOL_MIN_RAW = -9472
     private val VOL_MAX_RAW = 6440
     private val TYPE_CODES = mapOf("PK" to 0x02.toByte(), "LS" to 0x03.toByte(), "HS" to 0x04.toByte())
+    private val presentationCoordinator by lazy {
+        MainPresentationCoordinator(VOL_MIN_RAW, VOL_MAX_RAW)
+    }
 
     private var isUserTouchingSlider = false
     private var lastSliderReleaseTime = 0L
@@ -109,16 +103,19 @@ class MainActivity : AppCompatActivity() {
     private var volumePercent = 50f
     private var isSyncing = false
     private var isMassPushing = false
-    @Volatile private var isQueueActive = false
     private var dacBalLeft = 0   // Track Left side attenuation
     private var dacBalRight = 0
     private var activeSlot: Byte = 0x00 // Required to unlock Flash Saving
 
-    private val commandQueue = Channel<ByteArray>(
-        capacity = 100,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST
-    )
-    private var queueProcessorJob: Job? = null
+    private val usbCommandQueueProcessor by lazy {
+        UsbCommandQueueProcessor(
+            reportId = REPORT_ID.toByte(),
+            cmdFlashEq = CMD_FLASH_EQ,
+            cmdPeqValues = CMD_PEQ_VALUES,
+            cmdGlobalGain = CMD_GLOBAL_GAIN,
+            usbMutex = usbMutex
+        )
+    }
     private var pollingJob: Job? = null
     private var volumeDebounceJob: Job? = null
     private var isPermissionRequested = false
@@ -130,7 +127,9 @@ class MainActivity : AppCompatActivity() {
         FilterBand(freq = frequencies[i])
     }
 
-    private val ACTION_USB_PERMISSION = "com.chesaudio.bpcontrol.USB_PERMISSION"
+    private val ACTION_USB_PERMISSION = "com.fossyaudio.bpcontrol.USB_PERMISSION"
+    private lateinit var appContainer: AppContainer
+    private lateinit var presetRepository: PresetRepository
     private lateinit var usbManager: UsbManager
     private var usbConnection: UsbDeviceConnection? = null
     private var usbInterface: UsbInterface? = null
@@ -153,7 +152,9 @@ class MainActivity : AppCompatActivity() {
         enableEdgeToEdge()
         setContentView(R.layout.activity_main)
 
+        appContainer = AppContainer(this)
         usbManager = getSystemService(USB_SERVICE) as UsbManager
+        presetRepository = appContainer.presetRepository
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             v.setPadding(systemBars.left, systemBars.top, systemBars.right, systemBars.bottom)
@@ -226,9 +227,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun calculateHeadroomDb(volPercent: Float): Float {
-        val currentRaw = (VOL_MIN_RAW + (volPercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-        val clampedRaw = currentRaw.coerceIn(VOL_MIN_RAW, VOL_MAX_RAW)
-        return (VOL_MAX_RAW - clampedRaw).toFloat() / 256f
+        return presentationCoordinator.calculateHeadroomDb(volPercent)
     }
 
     private fun showDeletePresetDialog() {
@@ -284,102 +283,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun loadPresetsFromPrefs() {
-        val prefs = getSharedPreferences("BP_PRESETS", Context.MODE_PRIVATE)
-        val jsonStr = prefs.getString("presets_data", null)
         presets.clear()
-
-        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-
-        if (jsonStr != null) {
-            try {
-                val array = org.json.JSONArray(jsonStr)
-                for (i in 0 until array.length()) {
-                    val pObj = array.getJSONObject(i)
-                    val name = pObj.getString("name")
-                    val preamp = pObj.optDouble("preamp", 0.0).toFloat()
-                    val bArray = pObj.getJSONArray("filters")
-                    val bList = mutableListOf<FilterBand>()
-                    for (b in 0 until 10) {
-                        if (b < bArray.length()) {
-                            val bObj = bArray.getJSONObject(b)
-                            bList.add(FilterBand(
-                                enabled = bObj.getBoolean("enabled"),
-                                type = bObj.getString("type"),
-                                freq = bObj.getInt("freq"),
-                                gain = bObj.getDouble("gain").toFloat(),
-                                q = bObj.getDouble("q").toFloat()
-                            ))
-                        } else {
-                            bList.add(FilterBand(freq = defaultFreqs[b]))
-                        }
-                    }
-                    presets.add(Preset(name, preamp, bList))
-                }
-            } catch (e: Exception) { Log.e("Presets", "JSON Parse Error", e) }
-        }
-
-        // --- Permanent System Presets ---
-        // Ensure "Flat" exists at index 0
-        if (presets.none { it.name == "Flat" }) {
-            val flatBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
-            presets.add(0, Preset("Flat", 0f, flatBands))
-        }
-
-        // Ensure "None" exists (scratchpad for unknown hardware states)
-        if (presets.none { it.name == "None" }) {
-            val noneBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i]) }
-            presets.add(Preset("None", 0f, noneBands))
-        }
+        presets.addAll(presetRepository.load())
     }
 
     private fun savePresetsToPrefs() {
-        val prefs = getSharedPreferences("BP_PRESETS", Context.MODE_PRIVATE)
-        val array = org.json.JSONArray()
-        for (p in presets) {
-            val pObj = org.json.JSONObject()
-            pObj.put("name", p.name)
-            pObj.put("preamp", p.preamp.toDouble())
-            val bArray = org.json.JSONArray()
-            for (b in p.bands) {
-                val bObj = org.json.JSONObject()
-                bObj.put("enabled", b.enabled)
-                bObj.put("type", b.type)
-                bObj.put("freq", b.freq)
-                bObj.put("gain", b.gain.toDouble())
-                bObj.put("q", b.q.toDouble())
-                bArray.put(bObj)
-            }
-            pObj.put("filters", bArray)
-            array.put(pObj)
-        }
-        prefs.edit().putString("presets_data", array.toString()).apply()
+        presetRepository.save(presets)
     }
 
     private fun identifyPreset(hwBands: List<FilterBand>): Int {
-        for (i in presets.indices) {
-            if (presets[i].name == "None") continue
-            var match = true
-
-            for (b in 0 until 10) {
-                val hw = hwBands[b]
-                val saved = presets[i].bands[b]
-
-                // Compare effective gains
-                val hwGain = if (hw.enabled) hw.gain else 0f
-                val savedGain = if (saved.enabled) saved.gain else 0f
-
-                if (abs(hwGain - savedGain) > 0.1f) { match = false; break }
-
-                // If the band is active, check specific parameters
-                if (abs(hwGain) > 0.1f || abs(savedGain) > 0.1f) {
-                    if (abs(hw.freq - saved.freq) > 1.0f) { match = false; break }
-                    if (abs(hw.q - saved.q) > 0.05f) { match = false; break }
-                    if (hw.type != saved.type) { match = false; break }
-                }
-            }
-            if (match) return i
-        }
-        return -1
+        return presentationCoordinator.identifyPreset(presets, hwBands)
     }
 
     private fun startConnectionWatchdog() {
@@ -907,7 +820,7 @@ class MainActivity : AppCompatActivity() {
                         isMassPushing = true
                         eqBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
                         latchSettings()
-                        while (!commandQueue.isEmpty || isQueueActive) { delay(50) }
+                        while (usbCommandQueueProcessor.hasPendingWork()) { delay(50) }
                         withContext(Dispatchers.Main) {
                             isMassPushing = false
                             debouncedSaveToFlash()
@@ -981,44 +894,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun sendFilterUpdate(index: Int, filter: FilterBand, autoLatch: Boolean = true) {
-        val fs = 48000.0
         // FIX: Calculate an effective gain (0f if disabled) and use it EVERYWHERE
         val effectiveGain = if (filter.enabled) filter.gain else 0f
-        val a = Math.pow(10.0, effectiveGain.toDouble() / 40.0)
-
-        val w0 = 2.0 * Math.PI * filter.freq / fs
-        val alpha = Math.sin(w0) / (2.0 * filter.q)
-        val cosW0 = Math.cos(w0)
-
-        var b0: Double; var b1: Double; var b2: Double
-        var a0: Double; var a1: Double; var a2: Double
-
-        when (filter.type) {
-            "LS", "HS" -> {
-                val s = if (filter.type == "HS") 1.0 else -1.0
-                val sqA = Math.sqrt(a)
-                b0 = a * ((a + 1.0) + s * (a - 1.0) * cosW0 + 2.0 * sqA * alpha)
-                b1 = -s * 2.0 * a * ((a - 1.0) + s * (a + 1.0) * cosW0)
-                b2 = a * ((a + 1.0) + s * (a - 1.0) * cosW0 - 2.0 * sqA * alpha)
-                a0 = (a + 1.0) - s * (a - 1.0) * cosW0 + 2.0 * sqA * alpha
-                a1 = s * 2.0 * ((a - 1.0) - s * (a + 1.0) * cosW0)
-                a2 = (a + 1.0) - s * (a - 1.0) * cosW0 - 2.0 * sqA * alpha
-            }
-            else -> { // "PK"
-                b0 = 1.0 + alpha * a
-                b1 = -2.0 * cosW0
-                b2 = 1.0 - alpha * a
-                a0 = 1.0 + alpha / a
-                a1 = -2.0 * cosW0
-                a2 = 1.0 - alpha / a
-            }
-        }
+        val effectiveFilter = filter.copy(gain = effectiveGain)
+        val coeffs = BiquadMath.coefficients(effectiveFilter, effectiveGain)
 
         val payload = ByteBuffer.allocate(60).order(ByteOrder.LITTLE_ENDIAN)
         payload.put(WRITE).put(CMD_PEQ_VALUES).put(0x18.toByte()).put(0x00).put(index.toByte()).put(0x00).put(0x00)
 
-        payload.putFloat((b0/a0).toFloat()); payload.putFloat((b1/a0).toFloat()); payload.putFloat((b2/a0).toFloat())
-        payload.putFloat((a1/a0).toFloat()); payload.putFloat((a2/a0).toFloat())
+        payload.putFloat(coeffs.b0); payload.putFloat(coeffs.b1); payload.putFloat(coeffs.b2)
+        payload.putFloat(coeffs.a1); payload.putFloat(coeffs.a2)
 
         payload.putShort(filter.freq.toShort())
         payload.putShort((filter.q * 256).toInt().toShort())
@@ -1038,64 +923,16 @@ class MainActivity : AppCompatActivity() {
 
     private fun sendHidCommand(payload: ByteArray) {
         // Simply push to the queue; the processor handles the rest sequentially
-        commandQueue.trySend(payload)
+        usbCommandQueueProcessor.enqueue(payload)
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun startQueueProcessor() {
-        queueProcessorJob?.cancel()
-        queueProcessorJob = lifecycleScope.launch(Dispatchers.IO) {
-            for (payload in commandQueue) {
-                isQueueActive = true // Mark processor as actively working
-                val connection = usbConnection
-                if (connection == null) {
-                    isQueueActive = false
-                    continue
-                }
-                try {
-                    val buffer = ByteArray(64)
-                    buffer[0] = REPORT_ID.toByte()
-                    System.arraycopy(payload, 0, buffer, 1, payload.size.coerceAtMost(63))
-                    val interfaceId = usbInterface?.id ?: 0
-
-                    var result = -1
-                    var retryCount = 0
-
-                    // CRITICAL FIX: Retry loop ensures hardware drops are recovered instead of silently failing
-                    while (result < 0 && retryCount < 3) {
-                        result = usbMutex.withLock {
-                            if (usbConnection != null) {
-                                connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, buffer, 64, 1000)
-                            } else -1
-                        }
-
-                        if (result < 0) {
-                            Log.e("USB", "Transfer Failed. Attempting Clear Halt and Retry...")
-                            usbMutex.withLock {
-                                usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
-                            }
-                            delay(50)
-                            retryCount++
-                        }
-                    }
-
-                    val delayTime = when {
-                        payload[1] == CMD_FLASH_EQ -> 600L     // Writing to internal flash takes time
-                        payload[1] == CMD_PEQ_VALUES -> 180L   // MCU needs time to calculate coefficients
-                        payload[1] == CMD_GLOBAL_GAIN -> 60L    // Simple volume is fast
-                        else -> 50L
-                    }
-                    delay(delayTime)
-                } catch (e: Exception) {
-                    Log.e("USB", "Queue Crash", e)
-                } finally {
-                    // Only release active state if there is nothing waiting in the buffer
-                    if (commandQueue.isEmpty) {
-                        isQueueActive = false
-                    }
-                }
-            }
-        }
+        usbCommandQueueProcessor.start(
+            scope = lifecycleScope,
+            connectionProvider = { usbConnection },
+            interfaceIdProvider = { usbInterface?.id ?: 0 }
+        )
     }
 
     @SuppressLint("NotifyDataSetChanged")
@@ -1293,96 +1130,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-
-    // --- RECYCLERVIEW ADAPTER (MOVED OUT OF FUNCTION TO PREVENT CRASHES) ---
-    class EqAdapter(private val bands: List<FilterBand>, private val onUpdate: (Int, FilterBand) -> Unit) : RecyclerView.Adapter<EqAdapter.ViewHolder>() {
-        class ViewHolder(v: View) : RecyclerView.ViewHolder(v) {
-            val check: CheckBox = v.findViewById(R.id.bandEnable)
-            val type: AutoCompleteTextView = v.findViewById(R.id.typeSelector)
-            val freq: EditText = v.findViewById(R.id.editFreq)
-            val gain: EditText = v.findViewById(R.id.editGain)
-            val q: EditText = v.findViewById(R.id.editQ)
-        }
-        override fun onCreateViewHolder(parent: ViewGroup, viewType: Int) = ViewHolder(LayoutInflater.from(parent.context).inflate(R.layout.item_eq_band, parent, false))
-        override fun onBindViewHolder(holder: ViewHolder, position: Int) {
-            val band = bands[position]
-
-            // FIX: Clear listeners BEFORE updating UI so recycled views don't trigger hardware spam
-            holder.check.setOnCheckedChangeListener(null)
-            holder.freq.setOnEditorActionListener(null)
-            holder.gain.setOnEditorActionListener(null)
-            holder.q.setOnEditorActionListener(null)
-
-            // 1. Populate UI with current model data
-            holder.check.isChecked = band.enabled
-            holder.freq.setText(band.freq.toString())
-            holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-            holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-
-            // 2. Fix Dropdown
-            val types = arrayOf("PK", "LS", "HS")
-            val typeAdapter = ArrayAdapter(holder.itemView.context, android.R.layout.simple_list_item_1, types)
-            holder.type.setAdapter(typeAdapter)
-            holder.type.inputType = InputType.TYPE_NULL
-            holder.type.setText(band.type, false)
-
-            holder.type.setOnItemClickListener { _, _, pos, _ ->
-                band.type = types[pos]
-                onUpdate(position, band)
-            }
-
-            holder.check.setOnCheckedChangeListener { _, isChecked ->
-                band.enabled = isChecked
-                onUpdate(position, band)
-            }
-
-            // 3. Update Action: Rounding & Bounce Back Logic
-            val updateAction = TextView.OnEditorActionListener { v, _, _ ->
-                try {
-                    // Check Freq (20 to 20,000)
-                    val fInput = holder.freq.text.toString().toIntOrNull()
-                    if (fInput != null && fInput in 20..20000) {
-                        band.freq = fInput
-                    } else {
-                        holder.freq.setText(band.freq.toString())
-                    }
-
-                    // Check Gain (-10.0 to 10.0) and round to 2 decimals
-                    val gInput = holder.gain.text.toString().toFloatOrNull()
-                    if (gInput != null && gInput in -10f..10f) {
-                        band.gain = Math.round(gInput * 100) / 100f
-                        holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-                    } else {
-                        holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-                    }
-
-                    // Check Q Factor (0.1 to 10.0) and round to 2 decimals
-                    val qInput = holder.q.text.toString().toFloatOrNull()
-                    if (qInput != null && qInput in 0.1f..10f) {
-                        band.q = Math.round(qInput * 100) / 100f
-                        holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-                    } else {
-                        holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-                    }
-
-                    onUpdate(position, band)
-                } catch (_: Exception) {
-                    // Failsafe
-                    holder.freq.setText(band.freq.toString())
-                    holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
-                    holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-                }
-                v.clearFocus()
-                false
-            }
-
-            holder.freq.setOnEditorActionListener(updateAction)
-            holder.gain.setOnEditorActionListener(updateAction)
-            holder.q.setOnEditorActionListener(updateAction)
-        }
-        override fun getItemCount() = bands.size
-    }
-
     @OptIn(ExperimentalCoroutinesApi::class)
     @SuppressLint("NotifyDataSetChanged")
     private fun parseAutoEq(uri: Uri) {
@@ -1492,7 +1239,7 @@ class MainActivity : AppCompatActivity() {
                     latchSettings()
 
                     // Wait for processor to finish
-                    while (!commandQueue.isEmpty || isQueueActive) { delay(50) }
+                    while (usbCommandQueueProcessor.hasPendingWork()) { delay(50) }
                     delay(100)
 
                     withContext(Dispatchers.Main) {
@@ -1515,7 +1262,7 @@ class MainActivity : AppCompatActivity() {
     private fun closeUsbConnection() {
         // 1. Signal all jobs to stop immediately
         //readThreadJob?.cancel()
-        queueProcessorJob?.cancel()
+        usbCommandQueueProcessor.stop()
         connectionWatchdogJob?.cancel()
         volumeDebounceJob?.cancel()
         isPermissionRequested = false
