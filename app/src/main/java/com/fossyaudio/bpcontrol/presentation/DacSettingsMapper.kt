@@ -15,7 +15,8 @@ data class ParsedPeqBand(
 
 class DacSettingsMapper(
     private val minRawVolume: Int,
-    private val maxRawVolume: Int
+    private val maxRawVolume: Int,
+    var profile: BlackPearlProtocol.FirmwareProfile = BlackPearlProtocol.FirmwareProfile.CB
 ) {
     fun parseVolumePercentOrNull(data: ByteArray): Float? {
         val rawVol = BlackPearlCodec.readSigned16LE(
@@ -62,7 +63,7 @@ class DacSettingsMapper(
             freq = rawFreq.coerceIn(20, 20000),
             q = rawQ.coerceIn(0.1f, 10.0f),
             gain = gain,
-            type = BlackPearlProtocol.FilterType.nameOf(data[BlackPearlProtocol.ParserOffset.PEQ_TYPE].toInt()),
+            type = BlackPearlProtocol.FilterType.nameOf(data[BlackPearlProtocol.ParserOffset.PEQ_TYPE].toInt(), profile),
             activeSlot = data[BlackPearlProtocol.ParserOffset.PEQ_ACTIVE_SLOT],
             enabled = abs(gain) > 0.01f
         )

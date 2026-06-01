@@ -17,7 +17,13 @@ object BlackPearlCodec {
         }
     }
 
-    fun encodePeqUpdate(index: Int, filter: FilterBand, coeffs: BiquadCoefficients, activeSlot: Byte): ByteArray {
+    fun encodePeqUpdate(
+        index: Int,
+        filter: FilterBand,
+        coeffs: BiquadCoefficients,
+        activeSlot: Byte,
+        profile: BlackPearlProtocol.FirmwareProfile = BlackPearlProtocol.FirmwareProfile.CB
+    ): ByteArray {
         val effectiveGain = if (filter.enabled) filter.gain else 0f
         return ByteBuffer
             .allocate(BlackPearlProtocol.Frame.PEQ_PAYLOAD_SIZE)
@@ -40,7 +46,7 @@ object BlackPearlCodec {
                 putShort(filter.freq.toShort())
                 putShort((filter.q * 256).toInt().toShort())
                 putShort((effectiveGain * 256).toInt().toShort())
-                put(BlackPearlProtocol.FilterType.codeOf(filter.type))
+                put(BlackPearlProtocol.FilterType.codeOf(filter.type, profile))
                 put(BlackPearlProtocol.Frame.END)
                 put(activeSlot)
                 put(BlackPearlProtocol.Frame.END)
