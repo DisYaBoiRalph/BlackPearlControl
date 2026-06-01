@@ -1,6 +1,9 @@
 package com.fossyaudio.bpcontrol.transport.protocol
 
 object BlackPearlProtocol {
+    /** Protocol path discriminator. TRN Black Pearl (VID=0x3302, PID=0x43E8, SchemeNo=16) uses CB. */
+    enum class FirmwareProfile { CB, LEGACY }
+
     object Device {
         const val VID = 0x3302
         const val PID = 0x43E8
@@ -24,6 +27,7 @@ object BlackPearlProtocol {
         const val GLOBAL_GAIN: Byte = 0x03
         const val PEQ_VALUES: Byte = 0x09
         const val LATCH_SETTINGS: Byte = 0x0A
+        const val READ_FW_VERSION: Byte = 0x0C
         const val FILTER: Byte = 0x11
         const val BALANCE: Byte = 0x16
         const val GAIN_MODE: Byte = 0x19
@@ -31,22 +35,48 @@ object BlackPearlProtocol {
     }
 
     object FilterType {
+        // CB profile codes — correct for Black Pearl (SchemeNo=16)
         const val PK: Byte = 0x02
-        const val LS: Byte = 0x03
-        const val HS: Byte = 0x04
+        const val LS: Byte = 0x01
+        const val HS: Byte = 0x03
+        // CB-only codes; reserved for internal protocol use, not surfaced in UI
+        internal const val LP: Byte = 0x04
+        internal const val HP: Byte = 0x05
 
-        fun codeOf(type: String): Byte = when (type) {
-            "LS" -> LS
-            "HS" -> HS
-            else -> PK
-        }
+        // Legacy/KT profile codes — kept for compatibility fallback
+        private const val LEGACY_PK: Byte = 0x00
+        private const val LEGACY_LS: Byte = 0x03
+        private const val LEGACY_HS: Byte = 0x04
 
-        fun nameOf(code: Int): String = when (code) {
-            PK.toInt() -> "PK"
-            LS.toInt() -> "LS"
-            HS.toInt() -> "HS"
-            else -> "PK"
-        }
+        fun codeOf(type: String, profile: FirmwareProfile = FirmwareProfile.CB): Byte =
+            when (profile) {
+                FirmwareProfile.CB -> when (type) {
+                    "LS" -> LS
+                    "HS" -> HS
+                    else -> PK
+                }
+                FirmwareProfile.LEGACY -> when (type) {
+                    "LS" -> LEGACY_LS
+                    "HS" -> LEGACY_HS
+                    else -> LEGACY_PK
+                }
+            }
+
+        fun nameOf(code: Int, profile: FirmwareProfile = FirmwareProfile.CB): String =
+            when (profile) {
+                FirmwareProfile.CB -> when (code) {
+                    PK.toInt() -> "PK"
+                    LS.toInt() -> "LS"
+                    HS.toInt() -> "HS"
+                    else -> "PK"
+                }
+                FirmwareProfile.LEGACY -> when (code) {
+                    LEGACY_PK.toInt() -> "PK"
+                    LEGACY_LS.toInt() -> "LS"
+                    LEGACY_HS.toInt() -> "HS"
+                    else -> "PK"
+                }
+            }
     }
 
     object Param {
@@ -56,8 +86,9 @@ object BlackPearlProtocol {
         const val PEQ_LENGTH: Byte = 0x18
         const val MIC_GAIN_PAGE: Byte = 0x02
         const val MIC_GAIN_SIGNED_FLAG: Byte = 0x80.toByte()
-        const val BALANCE_LEFT: Byte = 0x01
-        const val BALANCE_RIGHT: Byte = 0x00
+        // CB channel selector: 0 = left, 1 = right (Walkplay CB WPCBDataSender cmd 0x16)
+        const val BALANCE_LEFT: Byte = 0x00
+        const val BALANCE_RIGHT: Byte = 0x01
         const val PEQ_INDEX_BASE: Byte = 0x00
     }
 
