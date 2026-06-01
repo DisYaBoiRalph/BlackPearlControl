@@ -8,6 +8,92 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 
 class BlackPearlCodecTest {
+
+    // --- FilterType CB profile ---
+
+    @Test
+    fun cb_profile_pk_code_is_0x02() {
+        assertEquals(0x02.toByte(), BlackPearlProtocol.FilterType.codeOf("PK", BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    @Test
+    fun cb_profile_ls_code_is_0x01() {
+        assertEquals(0x01.toByte(), BlackPearlProtocol.FilterType.codeOf("LS", BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    @Test
+    fun cb_profile_hs_code_is_0x03() {
+        assertEquals(0x03.toByte(), BlackPearlProtocol.FilterType.codeOf("HS", BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    @Test
+    fun cb_profile_nameOf_roundtrip_pk() {
+        assertEquals("PK", BlackPearlProtocol.FilterType.nameOf(0x02, BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    @Test
+    fun cb_profile_nameOf_roundtrip_ls() {
+        assertEquals("LS", BlackPearlProtocol.FilterType.nameOf(0x01, BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    @Test
+    fun cb_profile_nameOf_roundtrip_hs() {
+        assertEquals("HS", BlackPearlProtocol.FilterType.nameOf(0x03, BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    @Test
+    fun cb_profile_unknown_code_falls_back_to_pk() {
+        assertEquals("PK", BlackPearlProtocol.FilterType.nameOf(0x99, BlackPearlProtocol.FirmwareProfile.CB))
+    }
+
+    // --- FilterType LEGACY profile ---
+
+    @Test
+    fun legacy_profile_pk_code_is_0x00() {
+        assertEquals(0x00.toByte(), BlackPearlProtocol.FilterType.codeOf("PK", BlackPearlProtocol.FirmwareProfile.LEGACY))
+    }
+
+    @Test
+    fun legacy_profile_ls_code_is_0x03() {
+        assertEquals(0x03.toByte(), BlackPearlProtocol.FilterType.codeOf("LS", BlackPearlProtocol.FirmwareProfile.LEGACY))
+    }
+
+    @Test
+    fun legacy_profile_hs_code_is_0x04() {
+        assertEquals(0x04.toByte(), BlackPearlProtocol.FilterType.codeOf("HS", BlackPearlProtocol.FirmwareProfile.LEGACY))
+    }
+
+    @Test
+    fun legacy_profile_nameOf_roundtrip_pk() {
+        assertEquals("PK", BlackPearlProtocol.FilterType.nameOf(0x00, BlackPearlProtocol.FirmwareProfile.LEGACY))
+    }
+
+    @Test
+    fun legacy_profile_nameOf_roundtrip_ls() {
+        assertEquals("LS", BlackPearlProtocol.FilterType.nameOf(0x03, BlackPearlProtocol.FirmwareProfile.LEGACY))
+    }
+
+    @Test
+    fun legacy_profile_nameOf_roundtrip_hs() {
+        assertEquals("HS", BlackPearlProtocol.FilterType.nameOf(0x04, BlackPearlProtocol.FirmwareProfile.LEGACY))
+    }
+
+    // --- Default profile is CB ---
+
+    @Test
+    fun default_codeOf_uses_cb_profile() {
+        assertEquals(BlackPearlProtocol.FilterType.codeOf("HS", BlackPearlProtocol.FirmwareProfile.CB),
+            BlackPearlProtocol.FilterType.codeOf("HS"))
+    }
+
+    @Test
+    fun default_nameOf_uses_cb_profile() {
+        assertEquals(BlackPearlProtocol.FilterType.nameOf(0x01, BlackPearlProtocol.FirmwareProfile.CB),
+            BlackPearlProtocol.FilterType.nameOf(0x01))
+    }
+
+    // --- encodePeqUpdate uses CB profile codes by default ---
+
     @Test
     fun read_request_encodes_expected_header_bytes() {
         val encoded = BlackPearlCodec.encodeReadRequest(
