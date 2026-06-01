@@ -90,6 +90,7 @@ class MainActivity : AppCompatActivity() {
     private val CMD_BALANCE = BlackPearlProtocol.Command.BALANCE
     private val CMD_PEQ_VALUES = BlackPearlProtocol.Command.PEQ_VALUES
     private val CMD_FLASH_EQ = BlackPearlProtocol.Command.FLASH_EQ
+    private val CMD_READ_FW_VERSION = BlackPearlProtocol.Command.READ_FW_VERSION
 
     private val VOL_MIN_RAW = -9472
     private val VOL_MAX_RAW = 6440
@@ -109,6 +110,10 @@ class MainActivity : AppCompatActivity() {
     private var dacBalLeft = 0   // Track Left side attenuation
     private var dacBalRight = 0
     private var activeSlot: Byte = END // Required to unlock Flash Saving
+    private var firmwareVersion: String = "unknown"
+    private var lastSentPeqIndex: Int = -1
+    private var lastSentFilter: com.fossyaudio.bpcontrol.shared.model.FilterBand? = null
+    private var peqVerifyJob: Job? = null
 
     private val usbCommandQueueProcessor by lazy {
         UsbCommandQueueProcessor(
@@ -360,6 +365,41 @@ class MainActivity : AppCompatActivity() {
     private fun saveToFlash() {
         if (usbConnection == null) return
         sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
+        val verifyIndex = lastSentPeqIndex
+        val verifyFilter = lastSentFilter
+        if (verifyIndex >= 0 && verifyFilter != null) {
+            peqVerifyJob?.cancel()
+            peqVerifyJob = lifecycleScope.launch(Dispatchers.IO) {
+                // Wait for flash to settle: queue flush delay (600ms) + buffer
+                delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS + 200L)
+                verifySentPeqBand(verifyIndex, verifyFilter)
+            }
+        }
+    }
+
+    private suspend fun verifySentPeqBand(index: Int, expected: FilterBand) {
+        val data = pullValueSync(CMD_PEQ_VALUES, END, END, index.toByte())
+        if (data == null) {
+            Log.w("BPControl/Protocol", "PEQ verify band $index: transport timeout — no response")
+            return
+        }
+        val readBack = dacSettingsMapper.parsePeqBand(data)
+        val typeMatch = readBack.type == expected.type
+        val freqMatch = readBack.freq == expected.freq
+        val gainMatch = kotlin.math.abs(readBack.gain - expected.gain) < 0.1f
+        val qMatch = kotlin.math.abs(readBack.q - expected.q) < 0.1f
+        if (typeMatch && freqMatch && gainMatch && qMatch) {
+            Log.d("BPControl/Protocol", "PEQ verify band $index: OK (type=${readBack.type} freq=${readBack.freq} gain=${readBack.gain} q=${readBack.q})")
+        } else {
+            Log.w(
+                "BPControl/Protocol",
+                "PEQ verify band $index: MISMATCH — " +
+                    "type=${expected.type}→${readBack.type} " +
+                    "freq=${expected.freq}→${readBack.freq} " +
+                    "gain=${expected.gain}→${readBack.gain} " +
+                    "q=${expected.q}→${readBack.q}"
+            )
+        }
     }
 
     // Added 'suspend' keyword to allow locking
@@ -937,9 +977,13 @@ class MainActivity : AppCompatActivity() {
                 index = index,
                 filter = effectiveFilter,
                 coeffs = coeffs,
-                activeSlot = activeSlot
+                activeSlot = activeSlot,
+                profile = dacSettingsMapper.profile
             )
         )
+
+        lastSentPeqIndex = index
+        lastSentFilter = effectiveFilter
 
         // FIX: Only latch and save if we aren't in the middle of a mass update
         if (autoLatch) {
@@ -968,6 +1012,19 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 isSyncing = true
+
+                // 0. Probe firmware version (CB cmd 0x0C) — best-effort; failure keeps CB profile
+                val fwData = pullValueSync(CMD_READ_FW_VERSION, END, END)
+                if (fwData != null) {
+                    val v0 = fwData[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt().toChar()
+                    val v1 = fwData[BlackPearlProtocol.ParserOffset.VALUE_MSB].toInt().toChar()
+                    val v2 = fwData[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt().toChar()
+                    firmwareVersion = "$v0$v1$v2".trim()
+                    Log.i("BPControl/Protocol", "Firmware version: $firmwareVersion (profile=CB)")
+                } else {
+                    Log.w("BPControl/Protocol", "Firmware probe (0x0C) got no response — keeping CB profile (best-effort)")
+                }
+                delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 1. Read Filter
                 pullValueSync(CMD_FILTER, END, END)?.let { data ->
@@ -1042,10 +1099,15 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 // 7. Read PEQ Bands
+                activeSlot = END // Reset before sync so stale value doesn't carry over
                 for (i in 0 until 10) {
                     pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
                         val parsedBand = dacSettingsMapper.parsePeqBand(data)
-                        activeSlot = parsedBand.activeSlot
+                        // Accept the first non-zero slot; all bands should report the same slot
+                        if (activeSlot == END && parsedBand.activeSlot != END) {
+                            activeSlot = parsedBand.activeSlot
+                            Log.d("BPControl/Protocol", "activeSlot=0x${activeSlot.toInt().and(0xFF).toString(16).uppercase(Locale.US)} confirmed from band $i")
+                        }
                         eqBands[i].apply {
                             freq = parsedBand.freq
                             q = parsedBand.q
@@ -1055,6 +1117,9 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
+                }
+                if (activeSlot == END) {
+                    Log.w("BPControl/Protocol", "activeSlot is still END=0x00 after all PEQ reads — flash save may fail")
                 }
 
             } finally {
