@@ -92,6 +92,17 @@ object BlackPearlProtocol {
         const val PEQ_INDEX_BASE: Byte = 0x00
     }
 
+    object BalanceSelector {
+        private fun isReversedFirmware(firmwareVersion: String?): Boolean =
+            firmwareVersion?.trim()?.startsWith("0.6") == true
+
+        fun leftChannelSelector(firmwareVersion: String?): Byte =
+            if (isReversedFirmware(firmwareVersion)) Param.BALANCE_RIGHT else Param.BALANCE_LEFT
+
+        fun rightChannelSelector(firmwareVersion: String?): Byte =
+            if (isReversedFirmware(firmwareVersion)) Param.BALANCE_LEFT else Param.BALANCE_RIGHT
+    }
+
     object ParserOffset {
         const val DIRECTION = 1
         const val COMMAND = 2

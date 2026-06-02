@@ -1024,6 +1024,10 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     Log.w("BPControl/Protocol", "Firmware probe (0x0C) got no response — keeping CB profile (best-effort)")
                 }
+                Log.i(
+                    "BPControl/Protocol",
+                    "Balance selectors: left=0x${BlackPearlProtocol.BalanceSelector.leftChannelSelector(firmwareVersion).toInt().and(0xFF).toString(16)} right=0x${BlackPearlProtocol.BalanceSelector.rightChannelSelector(firmwareVersion).toInt().and(0xFF).toString(16)} fw=$firmwareVersion"
+                )
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 1. Read Filter
@@ -1081,12 +1085,14 @@ class MainActivity : AppCompatActivity() {
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 6. Read Balance
-                pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, BlackPearlProtocol.Param.BALANCE_LEFT)?.let { data -> // Left
+                val balanceLeftSelector = BlackPearlProtocol.BalanceSelector.leftChannelSelector(firmwareVersion)
+                val balanceRightSelector = BlackPearlProtocol.BalanceSelector.rightChannelSelector(firmwareVersion)
+                pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, balanceLeftSelector)?.let { data -> // Left
                     val mag = dacSettingsMapper.parseBalanceMagnitude(data)
                     dacBalLeft = if (mag > 0) (mag - 256) else 0
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
-                pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, BlackPearlProtocol.Param.BALANCE_RIGHT)?.let { data -> // Right
+                pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, balanceRightSelector)?.let { data -> // Right
                     val mag = dacSettingsMapper.parseBalanceMagnitude(data)
                     dacBalRight = if (mag > 0) (256 - mag) else 0
                 }
@@ -1173,12 +1179,14 @@ class MainActivity : AppCompatActivity() {
     private fun updateBalance(v: Int) {
         val magL = if (v < 0) (256 + v) else END.toInt()
         val magR = if (v > 0) (256 - v) else END.toInt()
+        val balanceLeftSelector = BlackPearlProtocol.BalanceSelector.leftChannelSelector(firmwareVersion)
+        val balanceRightSelector = BlackPearlProtocol.BalanceSelector.rightChannelSelector(firmwareVersion)
         sendHidCommand(
             byteArrayOf(
                 WRITE,
                 CMD_BALANCE,
                 BlackPearlProtocol.Param.BALANCE_LENGTH,
-                BlackPearlProtocol.Param.BALANCE_LEFT,
+                balanceLeftSelector,
                 END,
                 magL.toByte()
             )
@@ -1189,7 +1197,7 @@ class MainActivity : AppCompatActivity() {
                     WRITE,
                     CMD_BALANCE,
                     BlackPearlProtocol.Param.BALANCE_LENGTH,
-                    BlackPearlProtocol.Param.BALANCE_RIGHT,
+                    balanceRightSelector,
                     END,
                     magR.toByte()
                 )

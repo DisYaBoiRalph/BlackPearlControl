@@ -92,6 +92,18 @@ class BlackPearlCodecTest {
             BlackPearlProtocol.FilterType.nameOf(0x01))
     }
 
+    @Test
+    fun balance_selector_uses_cb_mapping_for_0_5() {
+        assertEquals(BlackPearlProtocol.Param.BALANCE_LEFT, BlackPearlProtocol.BalanceSelector.leftChannelSelector("0.5"))
+        assertEquals(BlackPearlProtocol.Param.BALANCE_RIGHT, BlackPearlProtocol.BalanceSelector.rightChannelSelector("0.5"))
+    }
+
+    @Test
+    fun balance_selector_swaps_channels_for_0_6() {
+        assertEquals(BlackPearlProtocol.Param.BALANCE_RIGHT, BlackPearlProtocol.BalanceSelector.leftChannelSelector("0.6"))
+        assertEquals(BlackPearlProtocol.Param.BALANCE_LEFT, BlackPearlProtocol.BalanceSelector.rightChannelSelector("0.6"))
+    }
+
     // --- encodePeqUpdate uses CB profile codes by default ---
 
     @Test
