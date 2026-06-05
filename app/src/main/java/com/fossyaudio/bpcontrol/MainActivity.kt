@@ -1,12 +1,10 @@
 package com.fossyaudio.bpcontrol
 
 import android.annotation.SuppressLint
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.hardware.usb.UsbConstants
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
@@ -53,6 +51,7 @@ import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
+import com.fossyaudio.bpcontrol.transport.usb.UsbConnectionManager
 import com.fossyaudio.bpcontrol.transport.usb.UsbCommandQueueProcessor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -181,9 +180,7 @@ class MainActivity : AppCompatActivity() {
     }
     private var pollingJob: Job? = null
     private var volumeDebounceJob: Job? = null
-    private var isPermissionRequested = false
     private var isAppInFocus = false // FIX: Declare the focus tracker
-    private var connectionWatchdogJob: Job? = null
     private var lastVolTime = 0L // Limits live dragging to 25 FPS
     private val eqBands = MutableList(10) { i ->
         val frequencies = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
@@ -194,9 +191,13 @@ class MainActivity : AppCompatActivity() {
     private lateinit var appContainer: AppContainer
     private lateinit var presetRepository: PresetRepository
     private lateinit var usbManager: UsbManager
-    private var usbConnection: UsbDeviceConnection? = null
-    private var usbInterface: UsbInterface? = null
-    private var endpointIn: UsbEndpoint? = null
+    private lateinit var usbConnectionManager: UsbConnectionManager
+    private val usbConnection: UsbDeviceConnection?
+        get() = usbConnectionManager.usbConnection
+    private val usbInterface: UsbInterface?
+        get() = usbConnectionManager.usbInterface
+    private val endpointIn: UsbEndpoint?
+        get() = usbConnectionManager.endpointIn
 
     // Flash Debouncer
     private val flashHandler = Handler(Looper.getMainLooper())
@@ -217,6 +218,14 @@ class MainActivity : AppCompatActivity() {
 
         appContainer = AppContainer(this)
         usbManager = getSystemService(USB_SERVICE) as UsbManager
+        usbConnectionManager = UsbConnectionManager(
+            context = this,
+            usbManager = usbManager,
+            actionUsbPermission = ACTION_USB_PERMISSION,
+            vid = VID,
+            pid = PID,
+            usbMutex = usbMutex
+        )
         presetRepository = appContainer.presetRepository
         val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottom_navigation)
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
@@ -277,6 +286,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         isAppInFocus = true
+        usbConnectionManager.setAppInFocus(true)
 
         if (usbConnection == null) {
             // App just launched or was fully killed, start hunting for the DAC
@@ -291,6 +301,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onPause() {
         isAppInFocus = false
+        usbConnectionManager.setAppInFocus(false)
         // Stop background polling to save battery, but DO NOT sever the USB connection
         pollingJob?.cancel()
         super.onPause()
@@ -366,16 +377,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startConnectionWatchdog() {
-        connectionWatchdogJob?.cancel()
-        connectionWatchdogJob = lifecycleScope.launch(Dispatchers.IO) { // Shift to IO Thread
-            // Keep trying every 1.5s until a hardware connection is established
-            while (usbConnection == null && isAppInFocus) {
-                findAndConnect()
-                delay(BlackPearlProtocol.Timing.CONNECTION_WATCHDOG_INTERVAL_MS)
-                if (usbConnection != null) {
-                    Log.d("USB", "Watchdog: Connection successful.")
-                    break
-                }
+        usbConnectionManager.startConnectionWatchdog(lifecycleScope) {
+            startQueueProcessor()
+            lifecycleScope.launch(Dispatchers.IO) {
+                delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
+                readDacSettings()
+                startVolumePolling()
             }
         }
     }
@@ -516,100 +523,6 @@ class MainActivity : AppCompatActivity() {
             } catch (e: Exception) {
                 Log.e("USB", "Read command failed for cmd=${cmd.toUByte().toString(16)}", e)
                 null
-            }
-        }
-    }
-
-    private fun findAndConnect() {
-        val deviceList = usbManager.deviceList
-        for (device in deviceList.values) {
-            if (device.vendorId == VID && device.productId == PID) {
-                if (usbManager.hasPermission(device)) {
-                    setupConnection(device)
-                } else if (!isPermissionRequested && isAppInFocus) { // Gatekeeper added
-                    isPermissionRequested = true
-                    // FIX: Using FLAG_IMMUTABLE completely satisfies Android 14's strict security rules
-                    val flags =
-                        PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-
-                    val intent = Intent(ACTION_USB_PERMISSION)
-                    intent.setPackage(packageName)
-
-                    val permissionIntent = PendingIntent.getBroadcast(
-                        this,
-                        0,
-                        intent,
-                        flags
-                    )
-
-                    usbManager.requestPermission(device, permissionIntent)
-                }
-                break
-            }
-        }
-    }
-
-    private fun setupConnection(device: UsbDevice) {
-        // Launch on IO thread to prevent UI freezing during hardware handshakes
-        lifecycleScope.launch(Dispatchers.IO) {
-            val connection = usbManager.openDevice(device) ?: return@launch
-
-            var intf: UsbInterface? = null
-            for (i in 0 until device.interfaceCount) {
-                val tempIntf = device.getInterface(i)
-                if (tempIntf.interfaceClass == UsbConstants.USB_CLASS_HID || tempIntf.interfaceClass == 255) {
-                    intf = tempIntf
-                    break
-                }
-            }
-            if (intf == null) intf = device.getInterface(device.interfaceCount - 1)
-
-            // Non-blocking wait for ALSA to settle
-            delay(BlackPearlProtocol.Timing.USB_SETTLE_DELAY_MS)
-
-            var claimed = false
-            for (i: Int in 1..3) {
-                if (connection.claimInterface(intf, true)) {
-                    claimed = true
-                    break
-                }
-                delay(BlackPearlProtocol.Timing.CLAIM_RETRY_DELAY_MS) // Non-blocking delay
-            }
-
-            if (claimed) {
-                usbConnection = connection
-                usbInterface = intf
-
-                // CRITICAL FIX: Find the correct endpoint FIRST before attempting any transfers
-                for (i in 0 until intf.endpointCount) {
-                    val ep = intf.getEndpoint(i)
-                    if (ep.direction == UsbConstants.USB_DIR_IN &&
-                        ep.type == UsbConstants.USB_ENDPOINT_XFER_INT) {
-                        endpointIn = ep
-                    }
-                }
-
-                // CRITICAL FIX: Aggressively drain the hardware buffer of all stale packets
-                // CRITICAL FIX: Lock the bus while aggressively draining stale packets
-                endpointIn?.let { ep ->
-                    val dump = ByteArray(64)
-                    var bytesRead: Int
-                    var flushAttempts = 0
-                    usbMutex.withLock {
-                        do {
-                            bytesRead = connection.bulkTransfer(ep, dump, 64, 20)
-                            flushAttempts++
-                        } while (bytesRead > 0 && flushAttempts < 10)
-                    }
-                }
-
-                startQueueProcessor()
-
-
-                // Final sync once hardware is ready
-                delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
-                readDacSettings()
-                startVolumePolling()
             }
         }
     }
@@ -1290,10 +1203,18 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 ACTION_USB_PERMISSION -> {
-                    isPermissionRequested = false
+                    usbConnectionManager.onPermissionRequestHandled()
                     if (intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false)) {
-                        // Safe to call directly as setupConnection now handles thread shifting
-                        device?.let { setupConnection(it) }
+                        device?.let {
+                            usbConnectionManager.setupConnection(lifecycleScope, it) {
+                                startQueueProcessor()
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
+                                    readDacSettings()
+                                    startVolumePolling()
+                                }
+                            }
+                        }
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
@@ -1391,32 +1312,8 @@ class MainActivity : AppCompatActivity() {
         // 1. Signal all jobs to stop immediately
         //readThreadJob?.cancel()
         usbCommandQueueProcessor.stop()
-        connectionWatchdogJob?.cancel()
         volumeDebounceJob?.cancel()
-        isPermissionRequested = false
-
-        // 2. Move hardware release to a background thread to prevent UI freezing
-        val connectionToClose = usbConnection
-        val interfaceToRelease = usbInterface
-
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                // Wait for requestWait(100) in the read thread to naturally time out and release
-                delay(BlackPearlProtocol.Timing.USB_CLOSE_DELAY_MS)
-
-                connectionToClose?.apply {
-                    interfaceToRelease?.let { releaseInterface(it) }
-                    close()
-                }
-            } catch (e: Exception) {
-                Log.e("USB", "Cleanup Error", e)
-            }
-        }
-
-        // 3. Clear references immediately so the rest of the app knows we are disconnected
-        usbConnection = null
-        usbInterface = null
-        endpointIn = null
+        usbConnectionManager.closeConnection(lifecycleScope)
         pollingJob?.cancel()
 
         resetUiToDefaults()
