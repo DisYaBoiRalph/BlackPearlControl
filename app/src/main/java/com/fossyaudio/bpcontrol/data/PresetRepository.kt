@@ -2,6 +2,7 @@ package com.fossyaudio.bpcontrol.data
 
 import android.content.Context
 import android.util.Log
+import com.fossyaudio.bpcontrol.data.IPresetStorage
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import org.json.JSONArray
@@ -11,10 +12,10 @@ class PresetRepository(
     private val context: Context,
     private val prefsName: String = "BP_PRESETS",
     private val presetsKey: String = "presets_data"
-) {
+) : IPresetStorage {
     private val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
-    fun load(): MutableList<Preset> {
+    override fun load(): MutableList<Preset> {
         val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         val jsonStr = prefs.getString(presetsKey, null)
         val loaded = mutableListOf<Preset>()
@@ -55,7 +56,7 @@ class PresetRepository(
         return loaded
     }
 
-    fun save(presets: List<Preset>) {
+    override fun save(presets: List<Preset>) {
         val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         val array = JSONArray()
         for (p in presets) {

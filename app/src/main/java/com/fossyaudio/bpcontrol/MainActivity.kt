@@ -41,7 +41,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.slider.Slider
-import com.fossyaudio.bpcontrol.data.PresetRepository
+import com.fossyaudio.bpcontrol.data.IPresetStorage
 import com.fossyaudio.bpcontrol.di.AppContainer
 import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
@@ -199,7 +199,7 @@ class MainActivity : AppCompatActivity() {
 
     private val ACTION_USB_PERMISSION = "com.fossyaudio.bpcontrol.USB_PERMISSION"
     private lateinit var appContainer: AppContainer
-    private lateinit var presetRepository: PresetRepository
+    private lateinit var presetStorage: IPresetStorage
     private lateinit var usbManager: UsbManager
     private lateinit var usbConnectionManager: UsbConnectionManager
     private val usbConnection: UsbDeviceConnection?
@@ -236,7 +236,7 @@ class MainActivity : AppCompatActivity() {
             pid = PID,
             usbMutex = usbMutex
         )
-        presetRepository = appContainer.presetRepository
+        presetStorage = appContainer.presetStorage
         val bottomNavigation = findViewById<BottomNavigationView>(R.id.bottom_navigation)
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main)) { v, insets ->
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
@@ -375,11 +375,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun loadPresetsFromPrefs() {
         presets.clear()
-        presets.addAll(presetRepository.load())
+        presets.addAll(presetStorage.load())
     }
 
     private fun savePresetsToPrefs() {
-        presetRepository.save(presets)
+        presetStorage.save(presets)
     }
 
     private fun identifyPreset(hwBands: List<FilterBand>): Int {
