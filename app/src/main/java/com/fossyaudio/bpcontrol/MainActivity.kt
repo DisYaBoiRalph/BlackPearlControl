@@ -34,6 +34,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
@@ -62,7 +63,6 @@ import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
 
-@Suppress("DEPRECATION")
 class MainActivity : AppCompatActivity() {
 
     private var presets = mutableListOf<Preset>()
@@ -1225,7 +1225,7 @@ class MainActivity : AppCompatActivity() {
     // Update the receiver to listen for NEW attachments
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val device = intent.getParcelableExtra<UsbDevice>(UsbManager.EXTRA_DEVICE)
+            val device = IntentCompat.getParcelableExtra(intent, UsbManager.EXTRA_DEVICE, UsbDevice::class.java)
             when (intent.action) {
                 // FIX: Automatically catch when the DAC is physically plugged in
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
