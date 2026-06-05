@@ -6,6 +6,7 @@ plugins {
 kotlin {
     jvmToolchain(11)
     androidTarget()
+    jvm()
 
     sourceSets {
         commonMain.dependencies {
