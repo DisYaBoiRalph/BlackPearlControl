@@ -9,4 +9,9 @@
 
     <color name="purple_500">#6200EE</color>
 
+    <!-- Status Colors -->
+    <color name="status_pending">#FF9800</color> <!-- Orange -->
+    <color name="status_success">#4CAF50</color> <!-- Green -->
+    <color name="status_error">#F44336</color>   <!-- Red -->
+    <color name="status_idle">#9E9E9E</color>    <!-- Grey -->
 </resources>

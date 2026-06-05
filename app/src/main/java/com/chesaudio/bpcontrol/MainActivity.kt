@@ -101,7 +101,6 @@ class MainActivity : AppCompatActivity() {
 
     private val VOL_MIN_RAW = -9472
     private val VOL_MAX_RAW = 6440
-    private val TYPE_CODES = mapOf("PK" to 0x02.toByte(), "LS" to 0x03.toByte(), "HS" to 0x04.toByte())
 
     private var isUserTouchingSlider = false
     private var lastSliderReleaseTime = 0L
@@ -110,9 +109,15 @@ class MainActivity : AppCompatActivity() {
     private var isSyncing = false
     private var isMassPushing = false
     @Volatile private var isQueueActive = false
+        set(value) {
+            field = value
+            updateStatusDot()
+        }
     private var dacBalLeft = 0   // Track Left side attenuation
     private var dacBalRight = 0
     private var activeSlot: Byte = 0x00 // Required to unlock Flash Saving
+
+    private var greenDelayJob: Job? = null
 
     private val commandQueue = Channel<ByteArray>(
         capacity = 100,
@@ -136,9 +141,12 @@ class MainActivity : AppCompatActivity() {
     private var usbInterface: UsbInterface? = null
     private var endpointIn: UsbEndpoint? = null
 
-    // Flash Debouncer
+    private var isFlashSavePending = false
     private val flashHandler = Handler(Looper.getMainLooper())
-    private val flashRunnable = Runnable { saveToFlash() }
+    private val flashRunnable = Runnable {
+        isFlashSavePending = false
+        saveToFlash()
+    }
 
     private val importLauncher = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri?.let { parseAutoEq(it) }
@@ -277,8 +285,47 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun updateStatusDot() {
+        runOnUiThread {
+            val dots = listOfNotNull(
+                findViewById<View>(R.id.statusDotSettings),
+                findViewById<View>(R.id.statusDotEq)
+            )
+            if (dots.isEmpty()) return@runOnUiThread
+
+            val isDisconnected = usbConnection == null
+            val isBusy = isQueueActive || !commandQueue.isEmpty || isFlashSavePending || isSyncing || isMassPushing
+
+            if (isDisconnected) {
+                greenDelayJob?.cancel()
+                setDotUI(dots, R.color.status_error)
+            } else if (isBusy) {
+                greenDelayJob?.cancel()
+                setDotUI(dots, R.color.status_pending)
+            } else {
+                // If not busy, wait a short moment before turning green to prevent blinking during rapid updates
+                if (greenDelayJob?.isActive != true) {
+                    greenDelayJob = lifecycleScope.launch {
+                        delay(400) // 400ms "Settle" time
+                        setDotUI(dots, R.color.status_success)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun setDotUI(dots: List<View>, colorRes: Int) {
+        val drawable = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(getColor(colorRes))
+        }
+        dots.forEach { it.background = drawable }
+    }
+
     private fun debouncedSaveToFlash() {
         // Stop any pending save and schedule a new one after 1 second of silence
+        isFlashSavePending = true
+        updateStatusDot()
         flashHandler.removeCallbacks(flashRunnable)
         flashHandler.postDelayed(flashRunnable, 1000)
     }
@@ -296,6 +343,10 @@ class MainActivity : AppCompatActivity() {
                 for (i in 0 until array.length()) {
                     val pObj = array.getJSONObject(i)
                     val name = pObj.getString("name")
+
+                    // CRITICAL: Never load "Flat" or "None" from disk to ensure they stay clean/scratchpad
+                    if (name == "Flat" || name == "None") continue
+
                     val preamp = pObj.optDouble("preamp", 0.0).toFloat()
                     val bArray = pObj.getJSONArray("filters")
                     val bList = mutableListOf<FilterBand>()
@@ -319,23 +370,22 @@ class MainActivity : AppCompatActivity() {
         }
 
         // --- Permanent System Presets ---
-        // Ensure "Flat" exists at index 0
-        if (presets.none { it.name == "Flat" }) {
-            val flatBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
-            presets.add(0, Preset("Flat", 0f, flatBands))
-        }
+        // Ensure "Flat" exists at index 0 and is ALWAYS clean (0dB, default freqs)
+        val flatBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
+        presets.add(0, Preset("Flat", 0f, flatBands))
 
-        // Ensure "None" exists (scratchpad for unknown hardware states)
-        if (presets.none { it.name == "None" }) {
-            val noneBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i]) }
-            presets.add(Preset("None", 0f, noneBands))
-        }
+        // Ensure "None" exists (scratchpad for unknown hardware states or temporary tweaks)
+        val noneBands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i]) }
+        presets.add(Preset("None", 0f, noneBands))
     }
 
     private fun savePresetsToPrefs() {
         val prefs = getSharedPreferences("BP_PRESETS", Context.MODE_PRIVATE)
         val array = org.json.JSONArray()
         for (p in presets) {
+            // System presets are recreated at runtime, so we don't need to save them
+            if (p.name == "Flat" || p.name == "None") continue
+
             val pObj = org.json.JSONObject()
             pObj.put("name", p.name)
             pObj.put("preamp", p.preamp.toDouble())
@@ -442,6 +492,7 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             isSyncing = true
+            updateStatusDot()
 
             // 1. Reset Global Settings to Hardware Defaults
             volumePercent = 50f
@@ -609,6 +660,7 @@ class MainActivity : AppCompatActivity() {
                 delay(500)
                 readDacSettings()
                 startVolumePolling()
+                updateStatusDot()
             }
         }
     }
@@ -756,6 +808,7 @@ class MainActivity : AppCompatActivity() {
                 .setPositiveButton("Reset") { _, _ ->
                     lifecycleScope.launch {
                         isSyncing = true
+                        updateStatusDot()
 
                         // 1. Reset Global Settings
                         volumePercent = 50f
@@ -845,7 +898,21 @@ class MainActivity : AppCompatActivity() {
 
                 // 2. SAVE TO PRESET LIST
                 if (presets.indices.contains(currentPresetIndex)) {
-                    presets[currentPresetIndex].bands[index] = band.copy()
+                    val currentPreset = presets[currentPresetIndex]
+
+                    if (currentPreset.name == "Flat") {
+                        // If user edits "Flat", switch them to "None" scratchpad to keep Flat clean
+                        val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
+                        currentPresetIndex = noneIdx
+                        findViewById<Button>(R.id.btnPresets)?.text = "None"
+
+                        // Sync None with current state
+                        presets[noneIdx].bands.clear()
+                        presets[noneIdx].bands.addAll(eqBands.map { it.copy() })
+                    } else {
+                        // Regular preset or "None" - update single band
+                        presets[currentPresetIndex].bands[index] = band.copy()
+                    }
                     savePresetsToPrefs() // Commit to SharedPreferences
                 }
 
@@ -993,26 +1060,13 @@ class MainActivity : AppCompatActivity() {
         var b0: Double; var b1: Double; var b2: Double
         var a0: Double; var a1: Double; var a2: Double
 
-        when (filter.type) {
-            "LS", "HS" -> {
-                val s = if (filter.type == "HS") 1.0 else -1.0
-                val sqA = Math.sqrt(a)
-                b0 = a * ((a + 1.0) + s * (a - 1.0) * cosW0 + 2.0 * sqA * alpha)
-                b1 = -s * 2.0 * a * ((a - 1.0) + s * (a + 1.0) * cosW0)
-                b2 = a * ((a + 1.0) + s * (a - 1.0) * cosW0 - 2.0 * sqA * alpha)
-                a0 = (a + 1.0) - s * (a - 1.0) * cosW0 + 2.0 * sqA * alpha
-                a1 = s * 2.0 * ((a - 1.0) - s * (a + 1.0) * cosW0)
-                a2 = (a + 1.0) - s * (a - 1.0) * cosW0 - 2.0 * sqA * alpha
-            }
-            else -> { // "PK"
-                b0 = 1.0 + alpha * a
-                b1 = -2.0 * cosW0
-                b2 = 1.0 - alpha * a
-                a0 = 1.0 + alpha / a
-                a1 = -2.0 * cosW0
-                a2 = 1.0 - alpha / a
-            }
-        }
+        // "PK" only
+        b0 = 1.0 + alpha * a
+        b1 = -2.0 * cosW0
+        b2 = 1.0 - alpha * a
+        a0 = 1.0 + alpha / a
+        a1 = -2.0 * cosW0
+        a2 = 1.0 - alpha / a
 
         val payload = ByteBuffer.allocate(60).order(ByteOrder.LITTLE_ENDIAN)
         payload.put(WRITE).put(CMD_PEQ_VALUES).put(0x18.toByte()).put(0x00).put(index.toByte()).put(0x00).put(0x00)
@@ -1024,7 +1078,7 @@ class MainActivity : AppCompatActivity() {
         payload.putShort((filter.q * 256).toInt().toShort())
         // FIX: Send effectiveGain (0 when off) instead of the raw slider value
         payload.putShort((effectiveGain * 256).toInt().toShort())
-        payload.put(TYPE_CODES[filter.type] ?: 0x02)
+        payload.put(0x02.toByte()) // Always PK type
         payload.put(0x00.toByte()).put(activeSlot).put(END)
 
         sendHidCommand(payload.array())
@@ -1039,6 +1093,7 @@ class MainActivity : AppCompatActivity() {
     private fun sendHidCommand(payload: ByteArray) {
         // Simply push to the queue; the processor handles the rest sequentially
         commandQueue.trySend(payload)
+        updateStatusDot()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -1065,25 +1120,25 @@ class MainActivity : AppCompatActivity() {
                     while (result < 0 && retryCount < 3) {
                         result = usbMutex.withLock {
                             if (usbConnection != null) {
-                                connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, buffer, 64, 1000)
+                                connection.controlTransfer(0x21, 0x09, 0x0200 or REPORT_ID, interfaceId, buffer, 64, 200)
                             } else -1
                         }
 
                         if (result < 0) {
                             Log.e("USB", "Transfer Failed. Attempting Clear Halt and Retry...")
                             usbMutex.withLock {
-                                usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 500)
+                                usbConnection?.controlTransfer(0x02, 0x01, 0x00, interfaceId, null, 0, 100)
                             }
-                            delay(50)
+                            delay(20)
                             retryCount++
                         }
                     }
 
                     val delayTime = when {
-                        payload[1] == CMD_FLASH_EQ -> 600L     // Writing to internal flash takes time
-                        payload[1] == CMD_PEQ_VALUES -> 180L   // MCU needs time to calculate coefficients
-                        payload[1] == CMD_GLOBAL_GAIN -> 60L    // Simple volume is fast
-                        else -> 50L
+                        payload[1] == CMD_FLASH_EQ -> 300L     // Reduced flash wait
+                        payload[1] == CMD_PEQ_VALUES -> 100L   // Reduced coefficient wait
+                        payload[1] == CMD_GLOBAL_GAIN -> 20L    // Fast volume
+                        else -> 20L
                     }
                     delay(delayTime)
                 } catch (e: Exception) {
@@ -1104,6 +1159,7 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 isSyncing = true
+                updateStatusDot()
 
                 // 1. Read Filter
                 pullValueSync(CMD_FILTER, END, 0x00)?.let { data ->
@@ -1188,15 +1244,15 @@ class MainActivity : AppCompatActivity() {
                         // SNAP LOGIC: Treat gains below 0.25dB as flat zero
                         if (abs(g) < 0.25f) g = 0.0f
 
-                        val bandType = when (data[34].toInt()) { 0x02 -> "PK"; 0x03 -> "LS"; 0x04 -> "HS"; else -> "PK" }
-
                         activeSlot = data[36]
                         eqBands[i].apply {
                             freq = f;
                             this.q = q;
                             gain = g;
-                            type = bandType;
-                            enabled = (abs(g) > 0.01f) // Auto-disable visually if it's effectively 0
+                            type = "PK";
+                            // FIX: Only force-enable if hardware has gain. 
+                            // If gain is 0, we preserve the current UI toggle state (checked/unchecked).
+                            if (abs(g) > 0.01f) enabled = true
                         }
                     }
                     delay(60)
@@ -1245,6 +1301,7 @@ class MainActivity : AppCompatActivity() {
 
                     // Release the sync flag LAST
                     isSyncing = false
+                    updateStatusDot()
                 }
             }
         }
@@ -1298,7 +1355,6 @@ class MainActivity : AppCompatActivity() {
     class EqAdapter(private val bands: List<FilterBand>, private val onUpdate: (Int, FilterBand) -> Unit) : RecyclerView.Adapter<EqAdapter.ViewHolder>() {
         class ViewHolder(v: View) : RecyclerView.ViewHolder(v) {
             val check: CheckBox = v.findViewById(R.id.bandEnable)
-            val type: AutoCompleteTextView = v.findViewById(R.id.typeSelector)
             val freq: EditText = v.findViewById(R.id.editFreq)
             val gain: EditText = v.findViewById(R.id.editGain)
             val q: EditText = v.findViewById(R.id.editQ)
@@ -1318,18 +1374,6 @@ class MainActivity : AppCompatActivity() {
             holder.freq.setText(band.freq.toString())
             holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
             holder.q.setText(String.format(Locale.US, "%.2f", band.q))
-
-            // 2. Fix Dropdown
-            val types = arrayOf("PK", "LS", "HS")
-            val typeAdapter = ArrayAdapter(holder.itemView.context, android.R.layout.simple_list_item_1, types)
-            holder.type.setAdapter(typeAdapter)
-            holder.type.inputType = InputType.TYPE_NULL
-            holder.type.setText(band.type, false)
-
-            holder.type.setOnItemClickListener { _, _, pos, _ ->
-                band.type = types[pos]
-                onUpdate(position, band)
-            }
 
             holder.check.setOnCheckedChangeListener { _, isChecked ->
                 band.enabled = isChecked
@@ -1427,13 +1471,8 @@ class MainActivity : AppCompatActivity() {
                                 val g = gainMatch?.groupValues?.getOrNull(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
                                 val q = qMatch?.groupValues?.getOrNull(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
 
-                                val t = when {
-                                    line.contains("LS") -> "LS"
-                                    line.contains("HS") -> "HS"
-                                    else -> "PK"
-                                }
                                 val en = !line.contains("OFF")
-                                tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
+                                tempBands.add(FilterBand(enabled = en, type = "PK", freq = f, gain = g, q = q))
                             }
                         }
                     }
@@ -1545,6 +1584,7 @@ class MainActivity : AppCompatActivity() {
         pollingJob?.cancel()
 
         resetUiToDefaults()
+        updateStatusDot()
     }
 
     override fun onDestroy() {
