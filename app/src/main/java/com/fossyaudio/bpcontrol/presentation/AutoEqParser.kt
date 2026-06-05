@@ -1,6 +1,7 @@
 package com.fossyaudio.bpcontrol.presentation
 
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import java.io.InputStream
 
 data class ParsedEqImport(
@@ -43,9 +44,9 @@ object AutoEqParser {
                     val q = qMatch?.groupValues?.getOrNull(1)
                         ?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
                     val t = when {
-                        line.contains("LS") -> "LS"
-                        line.contains("HS") -> "HS"
-                        else -> "PK"
+                        line.contains("LS") -> FilterType.LS
+                        line.contains("HS") -> FilterType.HS
+                        else -> FilterType.PK
                     }
                     val en = !line.contains("OFF")
                     tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))

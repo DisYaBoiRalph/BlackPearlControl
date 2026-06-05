@@ -2,13 +2,14 @@ package com.fossyaudio.bpcontrol.presentation
 
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.math.abs
 
 data class ParsedPeqBand(
     val freq: Int,
     val q: Float,
     val gain: Float,
-    val type: String,
+    val type: FilterType,
     val activeSlot: Byte,
     val enabled: Boolean
 )

@@ -1,6 +1,7 @@
 package com.fossyaudio.bpcontrol.shared.preset
 
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import kotlin.math.abs
 
@@ -21,8 +22,8 @@ object PresetMatcher {
                     break
                 }
 
-                val hwType = if (abs(hwGain) < 0.1f) "PK" else hw.type
-                val savedType = if (abs(savedGain) < 0.1f) "PK" else saved.type
+                val hwType = if (abs(hwGain) < 0.1f) FilterType.PK else hw.type
+                val savedType = if (abs(savedGain) < 0.1f) FilterType.PK else saved.type
                 if (hwType != savedType) {
                     match = false
                     break

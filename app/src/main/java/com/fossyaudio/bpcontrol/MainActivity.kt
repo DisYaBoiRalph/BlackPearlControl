@@ -49,6 +49,7 @@ import com.fossyaudio.bpcontrol.presentation.DacSyncService
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
@@ -1220,7 +1221,7 @@ class MainActivity : AppCompatActivity() {
                             val src = result.bands[i]
                             eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; this.q = src.q }
                         } else {
-                            eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
+                            eqBands[i].apply { enabled = false; type = FilterType.PK; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
                         }
                     }
 

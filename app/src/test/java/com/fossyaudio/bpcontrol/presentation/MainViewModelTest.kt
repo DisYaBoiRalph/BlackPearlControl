@@ -1,6 +1,7 @@
 package com.fossyaudio.bpcontrol.presentation
 
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,11 +37,11 @@ class MainViewModelTest {
         val vm = MainViewModel()
         val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
-        val flat = Preset("Flat", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = "PK") })
-        val custom = Preset("Custom", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = "PK") })
-        val none = Preset("None", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = "PK") })
+        val flat = Preset("Flat", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
+        val custom = Preset("Custom", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
+        val none = Preset("None", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
-        custom.bands[1] = FilterBand(enabled = true, type = "LS", freq = 63, gain = 2.0f, q = 0.8f)
+        custom.bands[1] = FilterBand(enabled = true, type = FilterType.LS, freq = 63, gain = 2.0f, q = 0.8f)
 
         val match = vm.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
 

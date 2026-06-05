@@ -11,6 +11,7 @@ import android.widget.EditText
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import java.util.Locale
 
 class EqAdapter(
@@ -42,11 +43,11 @@ class EqAdapter(
         holder.gain.setText(String.format(Locale.US, "%.2f", band.gain))
         holder.q.setText(String.format(Locale.US, "%.2f", band.q))
 
-        val types = arrayOf("PK", "LS", "HS")
+        val types = FilterType.entries.toTypedArray()
         val typeAdapter = ArrayAdapter(holder.itemView.context, android.R.layout.simple_list_item_1, types)
         holder.type.setAdapter(typeAdapter)
         holder.type.inputType = InputType.TYPE_NULL
-        holder.type.setText(band.type, false)
+        holder.type.setText(band.type.name, false)
 
         holder.type.setOnItemClickListener { _, _, pos, _ ->
             band.type = types[pos]

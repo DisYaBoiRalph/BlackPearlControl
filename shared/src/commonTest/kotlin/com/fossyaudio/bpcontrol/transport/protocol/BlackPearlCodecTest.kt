@@ -2,6 +2,7 @@ package com.fossyaudio.bpcontrol.transport.protocol
 
 import com.fossyaudio.bpcontrol.shared.eq.BiquadCoefficients
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -11,77 +12,77 @@ class BlackPearlCodecTest {
 
     @Test
     fun cb_profile_pk_code_is_0x02() {
-        assertEquals(0x02.toByte(), BlackPearlProtocol.FilterType.codeOf("PK", BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(0x02.toByte(), BlackPearlProtocol.FilterType.codeOf(FilterType.PK, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     @Test
     fun cb_profile_ls_code_is_0x01() {
-        assertEquals(0x01.toByte(), BlackPearlProtocol.FilterType.codeOf("LS", BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(0x01.toByte(), BlackPearlProtocol.FilterType.codeOf(FilterType.LS, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     @Test
     fun cb_profile_hs_code_is_0x03() {
-        assertEquals(0x03.toByte(), BlackPearlProtocol.FilterType.codeOf("HS", BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(0x03.toByte(), BlackPearlProtocol.FilterType.codeOf(FilterType.HS, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     @Test
     fun cb_profile_nameOf_roundtrip_pk() {
-        assertEquals("PK", BlackPearlProtocol.FilterType.nameOf(0x02, BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(FilterType.PK, BlackPearlProtocol.FilterType.nameOf(0x02, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     @Test
     fun cb_profile_nameOf_roundtrip_ls() {
-        assertEquals("LS", BlackPearlProtocol.FilterType.nameOf(0x01, BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(FilterType.LS, BlackPearlProtocol.FilterType.nameOf(0x01, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     @Test
     fun cb_profile_nameOf_roundtrip_hs() {
-        assertEquals("HS", BlackPearlProtocol.FilterType.nameOf(0x03, BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(FilterType.HS, BlackPearlProtocol.FilterType.nameOf(0x03, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     @Test
     fun cb_profile_unknown_code_falls_back_to_pk() {
-        assertEquals("PK", BlackPearlProtocol.FilterType.nameOf(0x99, BlackPearlProtocol.FirmwareProfile.CB))
+        assertEquals(FilterType.PK, BlackPearlProtocol.FilterType.nameOf(0x99, BlackPearlProtocol.FirmwareProfile.CB))
     }
 
     // --- FilterType LEGACY profile ---
 
     @Test
     fun legacy_profile_pk_code_is_0x00() {
-        assertEquals(0x00.toByte(), BlackPearlProtocol.FilterType.codeOf("PK", BlackPearlProtocol.FirmwareProfile.LEGACY))
+        assertEquals(0x00.toByte(), BlackPearlProtocol.FilterType.codeOf(FilterType.PK, BlackPearlProtocol.FirmwareProfile.LEGACY))
     }
 
     @Test
     fun legacy_profile_ls_code_is_0x03() {
-        assertEquals(0x03.toByte(), BlackPearlProtocol.FilterType.codeOf("LS", BlackPearlProtocol.FirmwareProfile.LEGACY))
+        assertEquals(0x03.toByte(), BlackPearlProtocol.FilterType.codeOf(FilterType.LS, BlackPearlProtocol.FirmwareProfile.LEGACY))
     }
 
     @Test
     fun legacy_profile_hs_code_is_0x04() {
-        assertEquals(0x04.toByte(), BlackPearlProtocol.FilterType.codeOf("HS", BlackPearlProtocol.FirmwareProfile.LEGACY))
+        assertEquals(0x04.toByte(), BlackPearlProtocol.FilterType.codeOf(FilterType.HS, BlackPearlProtocol.FirmwareProfile.LEGACY))
     }
 
     @Test
     fun legacy_profile_nameOf_roundtrip_pk() {
-        assertEquals("PK", BlackPearlProtocol.FilterType.nameOf(0x00, BlackPearlProtocol.FirmwareProfile.LEGACY))
+        assertEquals(FilterType.PK, BlackPearlProtocol.FilterType.nameOf(0x00, BlackPearlProtocol.FirmwareProfile.LEGACY))
     }
 
     @Test
     fun legacy_profile_nameOf_roundtrip_ls() {
-        assertEquals("LS", BlackPearlProtocol.FilterType.nameOf(0x03, BlackPearlProtocol.FirmwareProfile.LEGACY))
+        assertEquals(FilterType.LS, BlackPearlProtocol.FilterType.nameOf(0x03, BlackPearlProtocol.FirmwareProfile.LEGACY))
     }
 
     @Test
     fun legacy_profile_nameOf_roundtrip_hs() {
-        assertEquals("HS", BlackPearlProtocol.FilterType.nameOf(0x04, BlackPearlProtocol.FirmwareProfile.LEGACY))
+        assertEquals(FilterType.HS, BlackPearlProtocol.FilterType.nameOf(0x04, BlackPearlProtocol.FirmwareProfile.LEGACY))
     }
 
     // --- Default profile is CB ---
 
     @Test
     fun default_codeOf_uses_cb_profile() {
-        assertEquals(BlackPearlProtocol.FilterType.codeOf("HS", BlackPearlProtocol.FirmwareProfile.CB),
-            BlackPearlProtocol.FilterType.codeOf("HS"))
+        assertEquals(BlackPearlProtocol.FilterType.codeOf(FilterType.HS, BlackPearlProtocol.FirmwareProfile.CB),
+            BlackPearlProtocol.FilterType.codeOf(FilterType.HS))
     }
 
     @Test
@@ -128,7 +129,7 @@ class BlackPearlCodecTest {
 
     @Test
     fun peq_encode_uses_effective_gain_for_disabled_band() {
-        val band = FilterBand(enabled = false, type = "HS", freq = 8000, gain = 6f, q = 1.2f)
+        val band = FilterBand(enabled = false, type = FilterType.HS, freq = 8000, gain = 6f, q = 1.2f)
         val coeffs = BiquadCoefficients(1f, 2f, 3f, 4f, 5f)
         val payload = BlackPearlCodec.encodePeqUpdate(index = 4, filter = band, coeffs = coeffs, activeSlot = 0x7F)
 

@@ -1,6 +1,7 @@
 package com.fossyaudio.bpcontrol.shared.eq
 
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.log10
@@ -32,8 +33,8 @@ object BiquadMath {
         val a2: Double
 
         when (filter.type) {
-            "LS", "HS" -> {
-                val s = if (filter.type == "HS") 1.0 else -1.0
+            FilterType.LS, FilterType.HS -> {
+                val s = if (filter.type == FilterType.HS) 1.0 else -1.0
                 val sqA = sqrt(a)
                 b0 = a * ((a + 1.0) + s * (a - 1.0) * cosW0 + 2.0 * sqA * alpha)
                 b1 = -s * 2.0 * a * ((a - 1.0) + s * (a + 1.0) * cosW0)

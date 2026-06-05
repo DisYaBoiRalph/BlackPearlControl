@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.fossyaudio.bpcontrol.data.IPresetStorage
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import org.json.JSONArray
 import org.json.JSONObject
@@ -35,7 +36,9 @@ class PresetRepository(
                             bList.add(
                                 FilterBand(
                                     enabled = bObj.getBoolean("enabled"),
-                                    type = bObj.getString("type"),
+                                    type = runCatching {
+                                        FilterType.valueOf(bObj.getString("type"))
+                                    }.getOrDefault(FilterType.PK),
                                     freq = bObj.getInt("freq"),
                                     gain = bObj.getDouble("gain").toFloat(),
                                     q = bObj.getDouble("q").toFloat()
@@ -67,7 +70,7 @@ class PresetRepository(
             for (b in p.bands) {
                 val bObj = JSONObject()
                 bObj.put("enabled", b.enabled)
-                bObj.put("type", b.type)
+                bObj.put("type", b.type.name)
                 bObj.put("freq", b.freq)
                 bObj.put("gain", b.gain.toDouble())
                 bObj.put("q", b.q.toDouble())

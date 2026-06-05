@@ -1,6 +1,7 @@
 package com.fossyaudio.bpcontrol.presentation
 
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -43,7 +44,7 @@ class DacSettingsMapperTest {
             activeSlot = 0x01
         )
         val band = mapper.parsePeqBand(data)
-        assertEquals("HS", band.type)
+        assertEquals(FilterType.HS, band.type)
     }
 
     @Test
@@ -58,7 +59,7 @@ class DacSettingsMapperTest {
             activeSlot = 0x01
         )
         val band = mapper.parsePeqBand(data)
-        assertEquals("LS", band.type)
+        assertEquals(FilterType.LS, band.type)
     }
 
     @Test
@@ -73,7 +74,7 @@ class DacSettingsMapperTest {
             activeSlot = 0x01
         )
         val band = mapper.parsePeqBand(data)
-        assertEquals("PK", band.type)
+        assertEquals(FilterType.PK, band.type)
     }
 
     @Test
@@ -89,7 +90,7 @@ class DacSettingsMapperTest {
             activeSlot = 0x01
         )
         val band = mapper.parsePeqBand(data)
-        assertEquals("HS", band.type)
+        assertEquals(FilterType.HS, band.type)
     }
 
     @Test
@@ -113,6 +114,6 @@ class DacSettingsMapperTest {
             activeSlot = 0x01
         )
         val band = mapper.parsePeqBand(data)
-        assertEquals("PK", band.type)
+        assertEquals(FilterType.PK, band.type)
     }
 }

@@ -1,5 +1,7 @@
 package com.fossyaudio.bpcontrol.transport.protocol
 
+import com.fossyaudio.bpcontrol.shared.model.FilterType as BandFilterType
+
 object BlackPearlProtocol {
     /** Protocol path discriminator. TRN Black Pearl (VID=0x3302, PID=0x43E8, SchemeNo=16) uses CB. */
     enum class FirmwareProfile { CB, LEGACY }
@@ -48,33 +50,33 @@ object BlackPearlProtocol {
         private const val LEGACY_LS: Byte = 0x03
         private const val LEGACY_HS: Byte = 0x04
 
-        fun codeOf(type: String, profile: FirmwareProfile = FirmwareProfile.CB): Byte =
+        fun codeOf(type: BandFilterType, profile: FirmwareProfile = FirmwareProfile.CB): Byte =
             when (profile) {
                 FirmwareProfile.CB -> when (type) {
-                    "LS" -> LS
-                    "HS" -> HS
+                    BandFilterType.LS -> LS
+                    BandFilterType.HS -> HS
                     else -> PK
                 }
                 FirmwareProfile.LEGACY -> when (type) {
-                    "LS" -> LEGACY_LS
-                    "HS" -> LEGACY_HS
+                    BandFilterType.LS -> LEGACY_LS
+                    BandFilterType.HS -> LEGACY_HS
                     else -> LEGACY_PK
                 }
             }
 
-        fun nameOf(code: Int, profile: FirmwareProfile = FirmwareProfile.CB): String =
+        fun nameOf(code: Int, profile: FirmwareProfile = FirmwareProfile.CB): BandFilterType =
             when (profile) {
                 FirmwareProfile.CB -> when (code) {
-                    PK.toInt() -> "PK"
-                    LS.toInt() -> "LS"
-                    HS.toInt() -> "HS"
-                    else -> "PK"
+                    PK.toInt() -> BandFilterType.PK
+                    LS.toInt() -> BandFilterType.LS
+                    HS.toInt() -> BandFilterType.HS
+                    else -> BandFilterType.PK
                 }
                 FirmwareProfile.LEGACY -> when (code) {
-                    LEGACY_PK.toInt() -> "PK"
-                    LEGACY_LS.toInt() -> "LS"
-                    LEGACY_HS.toInt() -> "HS"
-                    else -> "PK"
+                    LEGACY_PK.toInt() -> BandFilterType.PK
+                    LEGACY_LS.toInt() -> BandFilterType.LS
+                    LEGACY_HS.toInt() -> BandFilterType.HS
+                    else -> BandFilterType.PK
                 }
             }
     }

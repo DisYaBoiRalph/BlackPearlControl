@@ -1,5 +1,6 @@
 package com.fossyaudio.bpcontrol.presentation
 
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -29,7 +30,7 @@ class AutoEqParserTest {
         assertEquals(-6.5f, result.preamp)
         assertEquals(31, result.bands[0].freq)
         assertEquals(3.0f, result.bands[0].gain)
-        assertEquals("PK", result.bands[0].type)
+        assertEquals(FilterType.PK, result.bands[0].type)
         assertTrue(result.bands[0].enabled)
     }
 
@@ -50,8 +51,8 @@ class AutoEqParserTest {
             Filter 2: ON HS Fc 10000 Hz Gain -1.5 dB Q 0.7
         """
         val result = parse(input)
-        assertEquals("LS", result.bands[0].type)
-        assertEquals("HS", result.bands[1].type)
+        assertEquals(FilterType.LS, result.bands[0].type)
+        assertEquals(FilterType.HS, result.bands[1].type)
     }
 
     @Test
