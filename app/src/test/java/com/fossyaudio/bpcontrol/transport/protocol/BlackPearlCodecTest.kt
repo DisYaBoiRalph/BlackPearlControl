@@ -2,8 +2,6 @@ package com.fossyaudio.bpcontrol.transport.protocol
 
 import com.fossyaudio.bpcontrol.shared.eq.BiquadCoefficients
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -134,13 +132,13 @@ class BlackPearlCodecTest {
         val coeffs = BiquadCoefficients(1f, 2f, 3f, 4f, 5f)
         val payload = BlackPearlCodec.encodePeqUpdate(index = 4, filter = band, coeffs = coeffs, activeSlot = 0x7F)
 
-        val reader = ByteBuffer.wrap(payload).order(ByteOrder.LITTLE_ENDIAN)
-        val encodedGain = reader.getShort(31)
+        // Gain at bytes 31-32 (LE signed 16), type at byte 33, slot at byte 35
+        val encodedGain = BlackPearlCodec.readSigned16LE(payload, 31, 32)
         val encodedType = payload[33]
         val encodedSlot = payload[35]
 
         assertEquals(BlackPearlProtocol.Frame.PEQ_PAYLOAD_SIZE, payload.size)
-        assertEquals(0, encodedGain.toInt())
+        assertEquals(0, encodedGain)
         assertEquals(BlackPearlProtocol.FilterType.HS, encodedType)
         assertEquals(0x7F.toByte(), encodedSlot)
     }
