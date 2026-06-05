@@ -2,6 +2,7 @@ package com.fossyaudio.bpcontrol.transport.usb
 
 import android.hardware.usb.UsbDeviceConnection
 import android.util.Log
+import com.fossyaudio.bpcontrol.transport.IHidTransport
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -20,7 +21,7 @@ class UsbCommandQueueProcessor(
     private val cmdPeqValues: Byte,
     private val cmdGlobalGain: Byte,
     private val usbMutex: Mutex
-) {
+) : IHidTransport {
     private val commandQueue = Channel<ByteArray>(
         capacity = BlackPearlProtocol.Timing.QUEUE_CAPACITY,
         onBufferOverflow = BufferOverflow.DROP_OLDEST
@@ -31,14 +32,14 @@ class UsbCommandQueueProcessor(
     private var queueActive: Boolean = false
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun hasPendingWork(): Boolean = !commandQueue.isEmpty || queueActive
+    override fun hasPendingWork(): Boolean = !commandQueue.isEmpty || queueActive
 
-    fun stop() {
+    override fun stop() {
         processorJob?.cancel()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    fun enqueue(payload: ByteArray) {
+    override fun enqueue(payload: ByteArray) {
         commandQueue.trySend(payload)
     }
 
