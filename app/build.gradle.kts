@@ -43,7 +43,8 @@ kotlin {
 
 dependencies {
     implementation(project(":shared"))
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
+    implementation(libs.androidx.lifecycle.runtime.ktx)
+    implementation(libs.androidx.lifecycle.viewmodel.ktx)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     implementation("com.google.android.material:material:1.12.0")
     implementation(libs.androidx.activity.ktx)

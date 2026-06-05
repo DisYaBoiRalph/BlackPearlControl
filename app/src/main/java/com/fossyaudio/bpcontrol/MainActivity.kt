@@ -31,6 +31,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.viewModels
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
@@ -46,7 +47,7 @@ import com.fossyaudio.bpcontrol.data.PresetRepository
 import com.fossyaudio.bpcontrol.di.AppContainer
 import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
-import com.fossyaudio.bpcontrol.presentation.MainPresentationCoordinator
+import com.fossyaudio.bpcontrol.presentation.MainViewModel
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
@@ -66,8 +67,19 @@ import kotlin.math.abs
 
 class MainActivity : AppCompatActivity() {
 
-    private var presets = mutableListOf<Preset>()
-    private var currentPresetIndex = 0
+    private val mainViewModel: MainViewModel by viewModels()
+
+    private var presets: MutableList<Preset>
+        get() = mainViewModel.presets
+        set(value) {
+            mainViewModel.presets = value
+        }
+
+    private var currentPresetIndex: Int
+        get() = mainViewModel.currentPresetIndex
+        set(value) {
+            mainViewModel.currentPresetIndex = value
+        }
 
     // Move these to the top of the class
     private val filterOptions = arrayOf("FAST-LL", "Fast-PC (BEST)", "Slow-LL", "SLOW-PC", "NOS")
@@ -95,9 +107,6 @@ class MainActivity : AppCompatActivity() {
 
     private val VOL_MIN_RAW = -9472
     private val VOL_MAX_RAW = 6440
-    private val presentationCoordinator by lazy {
-        MainPresentationCoordinator(VOL_MIN_RAW, VOL_MAX_RAW)
-    }
     private val dacSettingsMapper by lazy {
         DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW)
     }
@@ -105,15 +114,60 @@ class MainActivity : AppCompatActivity() {
     private var isUserTouchingSlider = false
     private var lastSliderReleaseTime = 0L
 
-    private var volumePercent = 50f
-    private var isSyncing = false
-    private var isMassPushing = false
-    private var dacBalLeft = 0   // Track Left side attenuation
-    private var dacBalRight = 0
-    private var activeSlot: Byte = END // Required to unlock Flash Saving
-    private var firmwareVersion: String = "unknown"
-    private var lastSentPeqIndex: Int = -1
-    private var lastSentFilter: com.fossyaudio.bpcontrol.shared.model.FilterBand? = null
+    private var volumePercent: Float
+        get() = mainViewModel.volumePercent
+        set(value) {
+            mainViewModel.volumePercent = value
+        }
+
+    private var isSyncing: Boolean
+        get() = mainViewModel.isSyncing
+        set(value) {
+            mainViewModel.isSyncing = value
+        }
+
+    private var isMassPushing: Boolean
+        get() = mainViewModel.isMassPushing
+        set(value) {
+            mainViewModel.isMassPushing = value
+        }
+
+    private var dacBalLeft: Int
+        get() = mainViewModel.dacBalLeft
+        set(value) {
+            mainViewModel.dacBalLeft = value
+        }
+
+    private var dacBalRight: Int
+        get() = mainViewModel.dacBalRight
+        set(value) {
+            mainViewModel.dacBalRight = value
+        }
+
+    private var activeSlot: Byte
+        get() = mainViewModel.activeSlot
+        set(value) {
+            mainViewModel.activeSlot = value
+        }
+
+    private var firmwareVersion: String
+        get() = mainViewModel.firmwareVersion
+        set(value) {
+            mainViewModel.firmwareVersion = value
+        }
+
+    private var lastSentPeqIndex: Int
+        get() = mainViewModel.lastSentPeqIndex
+        set(value) {
+            mainViewModel.lastSentPeqIndex = value
+        }
+
+    private var lastSentFilter: FilterBand?
+        get() = mainViewModel.lastSentFilter
+        set(value) {
+            mainViewModel.lastSentFilter = value
+        }
+
     private var peqVerifyJob: Job? = null
 
     private val usbCommandQueueProcessor by lazy {
@@ -243,7 +297,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun calculateHeadroomDb(volPercent: Float): Float {
-        return presentationCoordinator.calculateHeadroomDb(volPercent)
+        return mainViewModel.calculateHeadroomDb(volPercent, VOL_MIN_RAW, VOL_MAX_RAW)
     }
 
     private fun showDeletePresetDialog() {
@@ -308,7 +362,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun identifyPreset(hwBands: List<FilterBand>): Int {
-        return presentationCoordinator.identifyPreset(presets, hwBands)
+        return mainViewModel.identifyPreset(presets, hwBands)
     }
 
     private fun startConnectionWatchdog() {
