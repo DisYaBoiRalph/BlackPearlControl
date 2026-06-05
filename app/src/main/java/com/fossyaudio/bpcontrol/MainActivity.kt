@@ -45,6 +45,7 @@ import com.fossyaudio.bpcontrol.data.PresetRepository
 import com.fossyaudio.bpcontrol.di.AppContainer
 import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
+import com.fossyaudio.bpcontrol.presentation.DacSyncService
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
@@ -59,7 +60,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.Locale
 import kotlin.math.abs
@@ -108,6 +108,16 @@ class MainActivity : AppCompatActivity() {
     private val VOL_MAX_RAW = 6440
     private val dacSettingsMapper by lazy {
         DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW)
+    }
+    private val dacSyncService by lazy {
+        DacSyncService(
+            reportId = REPORT_ID,
+            readMarker = READ,
+            usbMutex = usbMutex,
+            connectionProvider = { usbConnection },
+            interfaceIdProvider = { usbInterface?.id ?: 0 },
+            endpointProvider = { endpointIn }
+        )
     }
 
     private var isUserTouchingSlider = false
@@ -471,60 +481,7 @@ class MainActivity : AppCompatActivity() {
         p2: Byte = BlackPearlProtocol.Frame.END,
         p3: Byte = BlackPearlProtocol.Frame.END
     ): ByteArray? {
-        val connection = usbConnection ?: return null
-        val interfaceId = usbInterface?.id ?: 0
-        val inEndpoint = endpointIn ?: return null
-
-        return usbMutex.withLock {
-            try {
-                val outBuffer = BlackPearlCodec.encodeReadRequest(cmd, p1, p2, p3)
-
-                // Clear any leftover packets first
-                val dump = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
-                while (
-                    connection.bulkTransfer(
-                        inEndpoint,
-                        dump,
-                        BlackPearlProtocol.Frame.REPORT_SIZE,
-                        BlackPearlProtocol.Timing.READ_FLUSH_TIMEOUT_MS
-                    ) > 0
-                ) { /* flush */ }
-
-                val writeResult = connection.controlTransfer(
-                    BlackPearlProtocol.Transfer.REQUEST_TYPE_CLASS_INTERFACE_OUT,
-                    BlackPearlProtocol.Transfer.REQUEST_SET_REPORT,
-                    BlackPearlProtocol.Transfer.VALUE_OUTPUT_REPORT_BASE or REPORT_ID.toInt(),
-                    interfaceId,
-                    outBuffer,
-                    BlackPearlProtocol.Frame.REPORT_SIZE,
-                    BlackPearlProtocol.Timing.READ_TRANSFER_TIMEOUT_MS
-                )
-                if (writeResult < 0) return@withLock null
-
-                val inBuffer = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
-                val startTime = System.currentTimeMillis()
-                while (System.currentTimeMillis() - startTime < BlackPearlProtocol.Timing.READ_WINDOW_MS) {
-                    val readResult = connection.bulkTransfer(
-                        inEndpoint,
-                        inBuffer,
-                        BlackPearlProtocol.Frame.REPORT_SIZE,
-                        BlackPearlProtocol.Timing.READ_POLL_TIMEOUT_MS
-                    )
-                    if (
-                        readResult > 0 &&
-                        inBuffer[BlackPearlProtocol.ParserOffset.DIRECTION] == READ &&
-                        inBuffer[BlackPearlProtocol.ParserOffset.COMMAND] == cmd
-                    ) {
-                        return@withLock inBuffer.copyOf()
-                    }
-                    delay(BlackPearlProtocol.Timing.READ_POLL_INTERVAL_MS)
-                }
-                null
-            } catch (e: Exception) {
-                Log.e("USB", "Read command failed for cmd=${cmd.toUByte().toString(16)}", e)
-                null
-            }
-        }
+        return dacSyncService.pullValueSync(cmd, p1, p2, p3)
     }
 
     private fun startVolumePolling() {
