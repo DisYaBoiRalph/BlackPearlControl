@@ -44,6 +44,7 @@ import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.slider.Slider
 import com.fossyaudio.bpcontrol.data.PresetRepository
 import com.fossyaudio.bpcontrol.di.AppContainer
+import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.presentation.MainPresentationCoordinator
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
@@ -1253,121 +1254,73 @@ class MainActivity : AppCompatActivity() {
     @OptIn(ExperimentalCoroutinesApi::class)
     @SuppressLint("NotifyDataSetChanged")
     private fun parseAutoEq(uri: Uri) {
-        // 1. SET SYNC FLAG IMMEDIATELY to lock out hardware polling
         isSyncing = true
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                contentResolver.openInputStream(uri)?.bufferedReader()?.use { reader ->
-                    val lines = reader.readLines()
-                    val tempBands = mutableListOf<FilterBand>()
-                    var parsedPreamp = 0f
-
-                    // CRITICAL FIX: Pre-compile Regex outside the loop.
-                    // Bypasses R8 loop-hoisting bugs and drastically improves CPU performance.
-                    val preampRegex = Regex("PREAMP\\s*[:=]?\\s*([-+.\\d]+)")
-                    val fcRegex = Regex("FC\\s*[:=]?\\s*([\\d.]+)")
-                    val gainRegex = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)")
-                    val qRegex = Regex("Q\\s*[:=]?\\s*([\\d.]+)")
-
-                    // Standard for-loop is safer against R8 bytecode mangling than lambdas
-                    val maxLines = minOf(lines.size, 200)
-                    for (i in 0 until maxLines) {
-                        val line = lines[i].trim().uppercase()
-
-                        // --- Parse Preamp ---
-                        if (line.contains("PREAMP")) {
-                            preampRegex.find(line)?.let {
-                                parsedPreamp = it.groupValues.getOrNull(1)?.toFloatOrNull() ?: 0f
-                            }
-                        }
-
-                        // --- Parse Filter ---
-                        if (line.contains("FILTER") && tempBands.size < 10) {
-                            val fcMatch = fcRegex.find(line)
-                            val gainMatch = gainRegex.find(line)
-                            val qMatch = qRegex.find(line)
-
-                            if (fcMatch != null) {
-                                // .getOrNull(1) prevents IndexOutOfBounds crashes if R8 strips capture groups
-                                val f = fcMatch.groupValues.getOrNull(1)?.toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
-                                val g = gainMatch?.groupValues?.getOrNull(1)?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
-                                val q = qMatch?.groupValues?.getOrNull(1)?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
-
-                                val t = when {
-                                    line.contains("LS") -> "LS"
-                                    line.contains("HS") -> "HS"
-                                    else -> "PK"
-                                }
-                                val en = !line.contains("OFF")
-                                tempBands.add(FilterBand(enabled = en, type = t, freq = f, gain = g, q = q))
-                            }
-                        }
-                    }
-
-                    if (tempBands.isEmpty()) {
-                        withContext(Dispatchers.Main) {
-                            isSyncing = false // Release lock on failure
-                            Toast.makeText(this@MainActivity, "No valid filters found", Toast.LENGTH_LONG).show()
-                        }
-                        return@launch
-                    }
-
-                    // 2. Update UI and Logic State
+                val stream = contentResolver.openInputStream(uri) ?: run {
                     withContext(Dispatchers.Main) {
-                        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-
-                        // Handle Preamp: AutoEQ preamps are usually negative (e.g. -6dB)
-                        // We translate this to our 0-100% volume slider if possible
-                        if (parsedPreamp < 0) {
-                            // Simple mapping: Adjust master volume to accommodate preamp headroom
-                            volumePercent = (volumePercent + (parsedPreamp * 2)).coerceIn(0f, 100f)
-                        }
-
-                        for (i in 0 until 10) {
-                            if (i < tempBands.size) {
-                                val src = tempBands[i]
-                                eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; this.q = src.q }
-                            } else {
-                                eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
-                            }
-                        }
-
-                        // Sync to 'None' preset so the Identity System recognizes the import
-                        val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
-                        val nonePreset = presets[noneIdx]
-                        nonePreset.preamp = volumePercent
-                        for (i in 0 until 10) nonePreset.bands[i] = eqBands[i].copy()
-                        currentPresetIndex = noneIdx
-                        findViewById<Button>(R.id.btnPresets)?.text = "None"
-
-                        findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
-                        findViewById<EqGraphView>(R.id.eqGraph)?.apply {
-                            this.bands = eqBands.map { it.copy() }
-                            val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-                            this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
-                            this.pathDirty = true
-                            this.postInvalidate()
-                        }
+                        isSyncing = false
+                        Toast.makeText(this@MainActivity, "Could not open file", Toast.LENGTH_LONG).show()
                     }
+                    return@launch
+                }
 
-                    // 3. Push to Hardware
-                    isMassPushing = true
-                    eqBands.forEachIndexed { index, band ->
-                        sendFilterUpdate(index, band, autoLatch = false)
-                    }
-                    latchSettings()
+                val result = stream.use { AutoEqParser.parse(it) }
 
-                    // Wait for processor to finish
-                    while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
-                    delay(BlackPearlProtocol.Timing.MASS_PUSH_SETTLE_DELAY_MS)
-
+                if (result.bands.isEmpty()) {
                     withContext(Dispatchers.Main) {
-                        isMassPushing = false
-                        isSyncing = false // Release lock
-                        debouncedSaveToFlash()
-                        Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
+                        isSyncing = false
+                        Toast.makeText(this@MainActivity, "No valid filters found", Toast.LENGTH_LONG).show()
                     }
+                    return@launch
+                }
+
+                val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+
+                withContext(Dispatchers.Main) {
+                    if (result.preamp < 0) {
+                        volumePercent = (volumePercent + (result.preamp * 2)).coerceIn(0f, 100f)
+                    }
+
+                    for (i in 0 until 10) {
+                        if (i < result.bands.size) {
+                            val src = result.bands[i]
+                            eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; this.q = src.q }
+                        } else {
+                            eqBands[i].apply { enabled = false; type = "PK"; freq = defaultFreqs[i]; gain = 0f; this.q = 1.0f }
+                        }
+                    }
+
+                    val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
+                    val nonePreset = presets[noneIdx]
+                    nonePreset.preamp = volumePercent
+                    for (i in 0 until 10) nonePreset.bands[i] = eqBands[i].copy()
+                    currentPresetIndex = noneIdx
+                    findViewById<Button>(R.id.btnPresets)?.text = "None"
+
+                    findViewById<RecyclerView>(R.id.eqRecyclerView)?.adapter?.notifyDataSetChanged()
+                    findViewById<EqGraphView>(R.id.eqGraph)?.apply {
+                        this.bands = eqBands.map { it.copy() }
+                        val currentRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
+                        this.preampDb = (VOL_MAX_RAW - currentRaw).toFloat() / 256f
+                        this.pathDirty = true
+                        this.postInvalidate()
+                    }
+                }
+
+                isMassPushing = true
+                eqBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
+                latchSettings()
+
+                while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
+                delay(BlackPearlProtocol.Timing.MASS_PUSH_SETTLE_DELAY_MS)
+
+                withContext(Dispatchers.Main) {
+                    isMassPushing = false
+                    isSyncing = false
+                    debouncedSaveToFlash()
+                    Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
                 Log.e("AutoEQ", "Import parsing failed", e)
