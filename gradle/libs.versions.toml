@@ -1,16 +1,16 @@
 [versions]
 agp = "9.2.1"
 kotlin = "2.2.21"
-coreKtx = "1.10.1"
+coreKtx = "1.13.1"
 junit = "4.13.2"
-junitVersion = "1.1.5"
-espressoCore = "3.5.1"
-appcompat = "1.6.1"
+junitVersion = "1.2.1"
+espressoCore = "3.6.1"
+appcompat = "1.7.0"
 material = "1.12.0"
-activityKtx = "1.8.0"
-constraintlayout = "2.1.4"
+activityKtx = "1.9.2"
+constraintlayout = "2.2.0"
 lifecycle = "2.8.7"
-coroutines = "1.7.3"
+coroutines = "1.8.1"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
