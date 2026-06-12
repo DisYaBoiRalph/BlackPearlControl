@@ -15,20 +15,7 @@
 -keep class com.fossyaudio.bpcontrol.shared.model.Preset { *; }
 
 # ------------------------------------------------------------------
-# 3. CUSTOM VIEWS (CRITICAL FOR XML INFLATION)
+# 3. COMPOSE UI STABILITY
 # ------------------------------------------------------------------
-# If R8 obfuscates the name of your custom graph view, the layout inflater
-# will throw a ClassNotFoundException on app launch.
--keep public class com.fossyaudio.bpcontrol.EqGraphView {
-    public <init>(android.content.Context);
-    public <init>(android.content.Context, android.util.AttributeSet);
-    public <init>(android.content.Context, android.util.AttributeSet, int);
-}
-
-# ------------------------------------------------------------------
-# 4. RECYCLERVIEW ADAPTER SAFETY
-# ------------------------------------------------------------------
-# Prevents R8 from aggressively stripping View references inside your ViewHolder.
--keepclassmembers class com.fossyaudio.bpcontrol.EqAdapter$ViewHolder {
-    <fields>;
-}
+# Compose compiler handles stability annotations; no custom view inflation needed.
+# Removed EqGraphView and EqAdapter rules (classes deleted — UI is now Compose).
