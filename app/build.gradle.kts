@@ -4,6 +4,12 @@ plugins {
     alias(libs.plugins.compose.compiler)
 }
 
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("compose_stability.conf")
+    )
+}
+
 android {
     namespace = "com.fossyaudio.bpcontrol"
     compileSdk {

@@ -94,7 +94,6 @@ fun SettingsScreen(viewModel: MainViewModel, actions: AppActions) {
                         actions.onVolumeStopDragging()
                     },
                     valueRange = 0f..100f,
-                    steps = 99,
                     enabled = !isSyncing,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -104,7 +103,6 @@ fun SettingsScreen(viewModel: MainViewModel, actions: AppActions) {
                     value = balanceValue,
                     onValueChange = { actions.onBalanceChange(it) },
                     valueRange = -15f..15f,
-                    steps = 29,
                     enabled = !isSyncing,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -168,7 +166,6 @@ fun SettingsScreen(viewModel: MainViewModel, actions: AppActions) {
                     value = micGainDb,
                     onValueChange = { actions.onMicGainChange(it) },
                     valueRange = -15f..15f,
-                    steps = 29,
                     enabled = !isSyncing,
                     modifier = Modifier.fillMaxWidth(),
                 )

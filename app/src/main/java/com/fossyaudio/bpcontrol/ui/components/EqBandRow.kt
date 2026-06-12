@@ -1,10 +1,9 @@
 package com.fossyaudio.bpcontrol.ui.components
 
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Checkbox
@@ -13,7 +12,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,8 +29,6 @@ import androidx.compose.ui.unit.sp
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 
-private val filterTypeOptions = FilterType.entries.map { it.name }
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun EqBandRow(
@@ -48,15 +44,14 @@ fun EqBandRow(
     var qText by remember(band.q) { mutableStateOf("%.2f".format(band.q)) }
 
     val fieldTextStyle = TextStyle(fontSize = 12.sp)
-    val fieldHeight = 48.dp
 
-    Surface(modifier = modifier) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
             // Enable checkbox
             Checkbox(
                 checked = band.enabled,
@@ -65,21 +60,24 @@ fun EqBandRow(
                 },
             )
 
-            // Filter type dropdown (fixed 85 dp)
+            // Filter type dropdown (equal weight with other fields)
             ExposedDropdownMenuBox(
                 expanded = typeExpanded,
                 onExpandedChange = { typeExpanded = it },
-                modifier = Modifier.width(85.dp),
+                modifier = Modifier
+                    .weight(1.4f),
             ) {
                 OutlinedTextField(
                     value = band.type.name,
                     onValueChange = {},
                     readOnly = true,
+                    singleLine = true,
                     textStyle = fieldTextStyle,
+                    label = { Text("Type", fontSize = 10.sp) },
                     trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
                     colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
                     modifier = Modifier
-                        .height(fieldHeight)
+                        .fillMaxWidth()
                         .menuAnchor(),
                 )
                 ExposedDropdownMenu(
@@ -116,9 +114,7 @@ fun EqBandRow(
                 }),
                 singleLine = true,
                 modifier = Modifier
-                    .weight(1f)
-                    .height(fieldHeight)
-                    .padding(horizontal = 2.dp),
+                    .weight(1f),
             )
 
             // Gain field
@@ -139,9 +135,7 @@ fun EqBandRow(
                 }),
                 singleLine = true,
                 modifier = Modifier
-                    .weight(1f)
-                    .height(fieldHeight)
-                    .padding(horizontal = 2.dp),
+                    .weight(1f),
             )
 
             // Q field
@@ -162,10 +156,7 @@ fun EqBandRow(
                 }),
                 singleLine = true,
                 modifier = Modifier
-                    .weight(1f)
-                    .height(fieldHeight)
-                    .padding(start = 2.dp),
+                    .weight(1f),
             )
-        }
     }
 }
