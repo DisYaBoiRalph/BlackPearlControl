@@ -22,7 +22,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "Black Pearl Control"
+rootProject.name = "BlackPearlControl"
 include(":app")
 include(":shared")
 include(":desktop")

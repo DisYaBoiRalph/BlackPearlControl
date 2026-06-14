@@ -2,6 +2,7 @@ package com.fossyaudio.bpcontrol.ui.screens
 
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -14,11 +15,9 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -217,7 +216,6 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SettingsDropdown(
     label: String,
@@ -230,25 +228,24 @@ private fun SettingsDropdown(
     var expanded by remember { mutableStateOf(false) }
     val selectedText = options.getOrElse(selectedIndex) { "" }
 
-    ExposedDropdownMenuBox(
-        expanded = expanded,
-        onExpandedChange = { if (enabled) expanded = it },
-        modifier = modifier,
-    ) {
+    Box(modifier = modifier) {
         OutlinedTextField(
             value = selectedText,
             onValueChange = {},
             readOnly = true,
             singleLine = true,
             label = { Text(label) },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+            trailingIcon = { Text(if (expanded) "▲" else "▼") },
             enabled = enabled,
             modifier = Modifier
                 .fillMaxWidth()
-                .menuAnchor(),
+                .pointerInput(enabled) {
+                    if (enabled) {
+                        detectTapGestures(onTap = { expanded = true })
+                    }
+                },
         )
-        ExposedDropdownMenu(
+        DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
         ) {
