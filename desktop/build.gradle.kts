@@ -1,3 +1,6 @@
+import org.gradle.jvm.toolchain.JavaLanguageVersion
+import org.jetbrains.compose.desktop.application.dsl.TargetFormat
+
 plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.compose.multiplatform)
@@ -6,7 +9,7 @@ plugins {
 }
 
 kotlin {
-    jvmToolchain(11)
+    jvmToolchain(17)
 }
 
 dependencies {
@@ -20,5 +23,12 @@ dependencies {
 compose.desktop {
     application {
         mainClass = "com.fossyaudio.bpcontrol.desktop.MainKt"
+        javaHome =
+            javaToolchains.launcherFor {
+                languageVersion.set(JavaLanguageVersion.of(17))
+            }.get().metadata.installationPath.asFile.absolutePath
+        nativeDistributions {
+            targetFormats(TargetFormat.Exe)
+        }
     }
 }
