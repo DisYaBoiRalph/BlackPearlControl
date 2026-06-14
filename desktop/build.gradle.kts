@@ -14,6 +14,7 @@ dependencies {
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation(libs.json)
+    implementation("org.hid4java:hid4java:0.8.0")
 }
 
 compose.desktop {
