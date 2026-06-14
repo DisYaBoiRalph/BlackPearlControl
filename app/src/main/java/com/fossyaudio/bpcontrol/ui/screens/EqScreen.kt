@@ -53,6 +53,7 @@ fun EqScreen(viewModel: MainViewModel, actions: AppActions) {
         )
 
         Spacer(Modifier.height(4.dp))
+        HorizontalDivider()
 
         EqBandsList(
             eqBands = eqBands,
