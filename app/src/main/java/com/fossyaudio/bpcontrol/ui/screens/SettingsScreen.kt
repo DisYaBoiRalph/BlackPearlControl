@@ -1,5 +1,8 @@
 package com.fossyaudio.bpcontrol.ui.screens
 
+import android.os.SystemClock
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,10 +32,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
 import com.fossyaudio.bpcontrol.ui.AppActions
+import kotlin.math.roundToInt
 
 private val filterOptions = arrayOf("FAST-LL", "Fast-PC (BEST)", "Slow-LL", "SLOW-PC", "NOS")
 private val gainOptions = arrayOf("LOW", "HIGH")
@@ -53,6 +58,7 @@ fun SettingsScreen(viewModel: MainViewModel, actions: AppActions) {
     // Local drag state prevents polling-driven slider snaps while user is interacting
     var volDragging by remember { mutableStateOf(false) }
     var localVol by remember(volumePercent) { mutableStateOf(volumePercent) }
+    var lastBalanceTapAtMs by remember { mutableStateOf(0L) }
 
     Column(
         modifier = Modifier
@@ -101,10 +107,28 @@ fun SettingsScreen(viewModel: MainViewModel, actions: AppActions) {
                 Text("Channel Balance", style = MaterialTheme.typography.bodyMedium)
                 Slider(
                     value = balanceValue,
-                    onValueChange = { actions.onBalanceChange(it) },
+                    onValueChange = { raw ->
+                        val snapped = raw.roundToInt().coerceIn(-15, 15).toFloat()
+                        actions.onBalanceChange(snapped)
+                    },
                     valueRange = -15f..15f,
+                    steps = 29,
                     enabled = !isSyncing,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .pointerInteropFilter { event ->
+                            if (!isSyncing && event.actionMasked == MotionEvent.ACTION_DOWN) {
+                                val now = SystemClock.uptimeMillis()
+                                val timeout = ViewConfiguration.getDoubleTapTimeout().toLong()
+                                if (now - lastBalanceTapAtMs <= timeout) {
+                                    actions.onBalanceChange(0f)
+                                    lastBalanceTapAtMs = 0L
+                                } else {
+                                    lastBalanceTapAtMs = now
+                                }
+                            }
+                            false
+                        },
                 )
             }
         }
