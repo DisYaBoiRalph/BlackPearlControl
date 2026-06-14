@@ -3,112 +3,70 @@ package com.fossyaudio.bpcontrol.presentation
 import androidx.lifecycle.ViewModel
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
-import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
-import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
-import kotlinx.coroutines.flow.MutableStateFlow
+import com.fossyaudio.bpcontrol.ui.AppUiState
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 
 class MainViewModel : ViewModel() {
 
-    private val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+    /** Shared platform-agnostic UI state. Compose screens consume this directly. */
+    val uiState = AppUiState()
 
-    // --- Preset state ---
-    private val _presets = MutableStateFlow<MutableList<Preset>>(mutableListOf())
-    val presets: StateFlow<MutableList<Preset>> = _presets.asStateFlow()
-    fun updatePresets(list: MutableList<Preset>) { _presets.value = list }
+    // --- Forwarding delegates so MainActivity call-sites remain unchanged ---
 
-    private val _currentPresetIndex = MutableStateFlow(0)
-    val currentPresetIndex: StateFlow<Int> = _currentPresetIndex.asStateFlow()
-    fun updateCurrentPresetIndex(v: Int) { _currentPresetIndex.value = v }
+    val presets: StateFlow<MutableList<Preset>> get() = uiState.presets
+    fun updatePresets(list: MutableList<Preset>) = uiState.updatePresets(list)
 
-    // --- Volume / balance ---
-    private val _volumePercent = MutableStateFlow(50f)
-    val volumePercent: StateFlow<Float> = _volumePercent.asStateFlow()
-    fun updateVolumePercent(v: Float) { _volumePercent.value = v }
+    val currentPresetIndex: StateFlow<Int> get() = uiState.currentPresetIndex
+    fun updateCurrentPresetIndex(v: Int) = uiState.updateCurrentPresetIndex(v)
 
-    private val _dacBalLeft = MutableStateFlow(0)
-    val dacBalLeft: StateFlow<Int> = _dacBalLeft.asStateFlow()
+    val volumePercent: StateFlow<Float> get() = uiState.volumePercent
+    fun updateVolumePercent(v: Float) = uiState.updateVolumePercent(v)
 
-    private val _dacBalRight = MutableStateFlow(0)
-    val dacBalRight: StateFlow<Int> = _dacBalRight.asStateFlow()
-    fun updateDacBalance(left: Int, right: Int) { _dacBalLeft.value = left; _dacBalRight.value = right }
+    val dacBalLeft: StateFlow<Int> get() = uiState.dacBalLeft
+    val dacBalRight: StateFlow<Int> get() = uiState.dacBalRight
+    fun updateDacBalance(left: Int, right: Int) = uiState.updateDacBalance(left, right)
 
-    private val _balanceValue = MutableStateFlow(0f)
-    val balanceValue: StateFlow<Float> = _balanceValue.asStateFlow()
-    fun updateBalanceValue(v: Float) { _balanceValue.value = v }
+    val balanceValue: StateFlow<Float> get() = uiState.balanceValue
+    fun updateBalanceValue(v: Float) = uiState.updateBalanceValue(v)
 
-    // --- DAC settings dropdowns (index into options arrays, -1 = unread) ---
-    private val _filterIndex = MutableStateFlow(-1)
-    val filterIndex: StateFlow<Int> = _filterIndex.asStateFlow()
-    fun updateFilterIndex(v: Int) { _filterIndex.value = v }
+    val filterIndex: StateFlow<Int> get() = uiState.filterIndex
+    fun updateFilterIndex(v: Int) = uiState.updateFilterIndex(v)
 
-    private val _gainModeIndex = MutableStateFlow(-1)
-    val gainModeIndex: StateFlow<Int> = _gainModeIndex.asStateFlow()
-    fun updateGainModeIndex(v: Int) { _gainModeIndex.value = v }
+    val gainModeIndex: StateFlow<Int> get() = uiState.gainModeIndex
+    fun updateGainModeIndex(v: Int) = uiState.updateGainModeIndex(v)
 
-    private val _ampTopoIndex = MutableStateFlow(-1)
-    val ampTopoIndex: StateFlow<Int> = _ampTopoIndex.asStateFlow()
-    fun updateAmpTopoIndex(v: Int) { _ampTopoIndex.value = v }
+    val ampTopoIndex: StateFlow<Int> get() = uiState.ampTopoIndex
+    fun updateAmpTopoIndex(v: Int) = uiState.updateAmpTopoIndex(v)
 
-    // --- Mic gain (dB) ---
-    private val _micGainDb = MutableStateFlow(0f)
-    val micGainDb: StateFlow<Float> = _micGainDb.asStateFlow()
-    fun updateMicGainDb(v: Float) { _micGainDb.value = v }
+    val micGainDb: StateFlow<Float> get() = uiState.micGainDb
+    fun updateMicGainDb(v: Float) = uiState.updateMicGainDb(v)
 
-    // --- EQ bands ---
-    private val _eqBands = MutableStateFlow<List<FilterBand>>(
-        List(10) { i -> FilterBand(freq = defaultFreqs[i]) }
-    )
-    val eqBands: StateFlow<List<FilterBand>> = _eqBands.asStateFlow()
-    fun updateEqBands(bands: List<FilterBand>) { _eqBands.value = bands.map { it.copy() } }
-    fun updateEqBand(index: Int, band: FilterBand) {
-        val updated = _eqBands.value.toMutableList()
-        if (index in updated.indices) updated[index] = band.copy()
-        _eqBands.value = updated
-    }
+    val eqBands: StateFlow<List<FilterBand>> get() = uiState.eqBands
+    fun updateEqBands(bands: List<FilterBand>) = uiState.updateEqBands(bands)
+    fun updateEqBand(index: Int, band: FilterBand) = uiState.updateEqBand(index, band)
 
-    // --- USB connection ---
-    private val _isConnected = MutableStateFlow(false)
-    val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
-    fun updateIsConnected(v: Boolean) { _isConnected.value = v }
+    val isConnected: StateFlow<Boolean> get() = uiState.isConnected
+    fun updateIsConnected(v: Boolean) = uiState.updateIsConnected(v)
 
-    // --- Sync / push interlocks ---
-    private val _isSyncing = MutableStateFlow(false)
-    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
-    fun updateIsSyncing(v: Boolean) { _isSyncing.value = v }
+    val isSyncing: StateFlow<Boolean> get() = uiState.isSyncing
+    fun updateIsSyncing(v: Boolean) = uiState.updateIsSyncing(v)
 
-    private val _isMassPushing = MutableStateFlow(false)
-    val isMassPushing: StateFlow<Boolean> = _isMassPushing.asStateFlow()
-    fun updateIsMassPushing(v: Boolean) { _isMassPushing.value = v }
+    val isMassPushing: StateFlow<Boolean> get() = uiState.isMassPushing
+    fun updateIsMassPushing(v: Boolean) = uiState.updateIsMassPushing(v)
 
-    // --- Hardware bookkeeping ---
-    private val _activeSlot = MutableStateFlow<Byte>(BlackPearlProtocol.Frame.END)
-    val activeSlot: StateFlow<Byte> = _activeSlot.asStateFlow()
-    fun updateActiveSlot(v: Byte) { _activeSlot.value = v }
+    val activeSlot: StateFlow<Byte> get() = uiState.activeSlot
+    fun updateActiveSlot(v: Byte) = uiState.updateActiveSlot(v)
 
-    private val _firmwareVersion = MutableStateFlow("unknown")
-    val firmwareVersion: StateFlow<String> = _firmwareVersion.asStateFlow()
-    fun updateFirmwareVersion(v: String) { _firmwareVersion.value = v }
+    val firmwareVersion: StateFlow<String> get() = uiState.firmwareVersion
+    fun updateFirmwareVersion(v: String) = uiState.updateFirmwareVersion(v)
 
-    private val _lastSentPeqIndex = MutableStateFlow(-1)
-    val lastSentPeqIndex: StateFlow<Int> = _lastSentPeqIndex.asStateFlow()
+    val lastSentPeqIndex: StateFlow<Int> get() = uiState.lastSentPeqIndex
+    val lastSentFilter: StateFlow<FilterBand?> get() = uiState.lastSentFilter
+    fun updateLastSentPeq(index: Int, filter: FilterBand?) = uiState.updateLastSentPeq(index, filter)
 
-    private val _lastSentFilter = MutableStateFlow<FilterBand?>(null)
-    val lastSentFilter: StateFlow<FilterBand?> = _lastSentFilter.asStateFlow()
-    fun updateLastSentPeq(index: Int, filter: FilterBand?) {
-        _lastSentPeqIndex.value = index
-        _lastSentFilter.value = filter
-    }
+    fun calculateHeadroomDb(volumePercent: Float, minRawVolume: Int, maxRawVolume: Int): Float =
+        uiState.calculateHeadroomDb(volumePercent, minRawVolume, maxRawVolume)
 
-    // --- Pure helper functions ---
-    fun calculateHeadroomDb(volumePercent: Float, minRawVolume: Int, maxRawVolume: Int): Float {
-        val currentRaw = (minRawVolume + (volumePercent / 100.0) * (maxRawVolume - minRawVolume)).toInt()
-        val clampedRaw = currentRaw.coerceIn(minRawVolume, maxRawVolume)
-        return (maxRawVolume - clampedRaw).toFloat() / 256f
-    }
-
-    fun identifyPreset(presets: List<Preset>, hwBands: List<FilterBand>): Int {
-        return PresetMatcher.identifyPreset(presets, hwBands)
-    }
+    fun identifyPreset(presets: List<Preset>, hwBands: List<FilterBand>): Int =
+        uiState.identifyPreset(presets, hwBands)
 }

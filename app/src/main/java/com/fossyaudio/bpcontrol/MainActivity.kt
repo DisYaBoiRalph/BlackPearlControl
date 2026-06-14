@@ -214,7 +214,7 @@ class MainActivity : AppCompatActivity() {
         setContent {
             BpControlTheme {
                 MainScreen(
-                    viewModel = mainViewModel,
+                    state = mainViewModel.uiState,
                     actions = AppActions(
                         onVolumeChange = { value ->
                             if (!isSyncing) {

@@ -40,7 +40,7 @@ object AutoEqParser {
                     val f = fcMatch.groupValues.getOrNull(1)
                         ?.toFloatOrNull()?.toInt()?.coerceIn(20, 20000) ?: 1000
                     val g = gainMatch?.groupValues?.getOrNull(1)
-                        ?.toFloatOrNull()?.coerceIn(-10f, 10f) ?: 0f
+                        ?.toFloatOrNull()?.coerceIn(-12f, 12f) ?: 0f
                     val q = qMatch?.groupValues?.getOrNull(1)
                         ?.toFloatOrNull()?.coerceIn(0.1f, 10f) ?: 1f
                     val t = when {
