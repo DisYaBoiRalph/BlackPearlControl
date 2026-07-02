@@ -147,11 +147,8 @@ class DesktopController(private val state: AppUiState) {
                     else -> BlackPearlProtocol.Timing.QUEUE_DELAY_DEFAULT_MS
                 }
 
-                // hid4java write: prepend report ID as first byte
-                val buf = ByteArray(payload.size + 1)
-                buf[0] = BlackPearlProtocol.Device.REPORT_ID
-                payload.copyInto(buf, destinationOffset = 1)
-                dev.write(buf, buf.size, BlackPearlProtocol.Device.REPORT_ID)
+                // hid4java prepends the reportId parameter itself — pass payload directly.
+                dev.write(payload, payload.size, BlackPearlProtocol.Device.REPORT_ID)
                 delay(delayMs)
             }
         }
@@ -165,17 +162,23 @@ class DesktopController(private val state: AppUiState) {
         p2: Byte = END,
         p3: Byte = END,
     ): ByteArray? {
-        val dev = device ?: return null
-        if (!dev.isOpen) return null
+        val dev = device ?: run { println("[BPControl/HID] pullValueSync cmd=0x${cmd.toInt().and(0xFF).toString(16)}: no device"); return null }
+        if (!dev.isOpen) { println("[BPControl/HID] pullValueSync cmd=0x${cmd.toInt().and(0xFF).toString(16)}: device not open"); return null }
 
+        // encodeReadRequest puts REPORT_ID at [0]. hid4java prepends reportId itself,
+        // so we strip [0] and let hid4java add it — otherwise device gets a double report ID.
         val request = BlackPearlCodec.encodeReadRequest(cmd, p1, p2, p3)
-        val buf = ByteArray(request.size + 1)
-        buf[0] = BlackPearlProtocol.Device.REPORT_ID
-        request.copyInto(buf, destinationOffset = 1)
-        dev.write(buf, buf.size, BlackPearlProtocol.Device.REPORT_ID)
+        val payload = request.copyOfRange(1, request.size)
+        val written = dev.write(payload, payload.size, BlackPearlProtocol.Device.REPORT_ID)
+        if (written < 0) {
+            println("[BPControl/HID] write failed cmd=0x${cmd.toInt().and(0xFF).toString(16)} err=${dev.lastErrorMessage}")
+            return null
+        }
 
         val response = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
         val read = dev.read(response, BlackPearlProtocol.Timing.READ_TRANSFER_TIMEOUT_MS)
+        println("[BPControl/HID] cmd=0x${cmd.toInt().and(0xFF).toString(16)} p1=0x${p1.toInt().and(0xFF).toString(16)} written=$written read=$read" +
+            if (read > 0) " resp=[${response.take(8).joinToString { "0x${it.toInt().and(0xFF).toString(16)}" }}...]" else " (null response)")
         return if (read > 0) response else null
     }
 
@@ -184,6 +187,7 @@ class DesktopController(private val state: AppUiState) {
     private suspend fun readDacSettings() {
         try {
             state.updateIsSyncing(true)
+            println("[BPControl/Desktop] Starting readDacSettings")
 
             // Firmware version
             pullValueSync(CMD_READ_FW_VERSION)?.let { data ->
@@ -192,37 +196,47 @@ class DesktopController(private val state: AppUiState) {
                 val v2 = data[BlackPearlProtocol.ParserOffset.VALUE_GUARD].toInt().toChar()
                 firmwareVersion = "$v0$v1$v2".trim()
                 println("[BPControl/Desktop] Firmware: $firmwareVersion (profile=CB)")
-            }
+            } ?: println("[BPControl/Desktop] FW version read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
             // Filter
             pullValueSync(CMD_FILTER)?.let { data ->
-                state.updateFilterIndex(data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt() - 1)
-            }
+                val idx = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt() - 1
+                println("[BPControl/Desktop] Filter index=$idx")
+                state.updateFilterIndex(idx)
+            } ?: println("[BPControl/Desktop] Filter read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
             // Gain mode
             pullValueSync(CMD_GAIN_MODE)?.let { data ->
-                state.updateGainModeIndex(data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt())
-            }
+                val idx = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
+                println("[BPControl/Desktop] GainMode index=$idx")
+                state.updateGainModeIndex(idx)
+            } ?: println("[BPControl/Desktop] GainMode read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
             // Amp topo
             pullValueSync(CMD_AMP_TOPO)?.let { data ->
-                state.updateAmpTopoIndex(data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt())
-            }
+                val idx = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
+                println("[BPControl/Desktop] AmpTopo index=$idx")
+                state.updateAmpTopoIndex(idx)
+            } ?: println("[BPControl/Desktop] AmpTopo read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
             // Volume
             pullValueSync(CMD_GLOBAL_GAIN)?.let { data ->
-                mapper.parseVolumePercentOrNull(data)?.let { state.updateVolumePercent(it) }
-            }
+                val vol = mapper.parseVolumePercentOrNull(data)
+                println("[BPControl/Desktop] Volume=$vol")
+                vol?.let { state.updateVolumePercent(it) }
+            } ?: println("[BPControl/Desktop] Volume read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
             // Mic gain
             pullValueSync(CMD_MIC_GAIN, BlackPearlProtocol.Param.MIC_GAIN_PAGE, BlackPearlProtocol.Param.MIC_GAIN_PAGE)?.let { data ->
-                state.updateMicGainDb(mapper.parseMicGainDb(data).toFloat())
-            }
+                val db = mapper.parseMicGainDb(data)
+                println("[BPControl/Desktop] MicGain=$db dB")
+                state.updateMicGainDb(db.toFloat())
+            } ?: println("[BPControl/Desktop] MicGain read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
             // Balance
@@ -232,12 +246,14 @@ class DesktopController(private val state: AppUiState) {
             pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, balL)?.let { data ->
                 val mag = mapper.parseBalanceMagnitude(data)
                 dacBalLeft = if (mag > 0) (mag - 256) else 0
-            }
+                println("[BPControl/Desktop] BalanceLeft mag=$mag dacBalLeft=$dacBalLeft")
+            } ?: println("[BPControl/Desktop] BalanceLeft read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
             pullValueSync(CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, balR)?.let { data ->
                 val mag = mapper.parseBalanceMagnitude(data)
                 dacBalRight = if (mag > 0) (256 - mag) else 0
-            }
+                println("[BPControl/Desktop] BalanceRight mag=$mag dacBalRight=$dacBalRight")
+            } ?: println("[BPControl/Desktop] BalanceRight read returned null")
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
             state.updateDacBalance(dacBalLeft, dacBalRight)
             val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
@@ -253,9 +269,11 @@ class DesktopController(private val state: AppUiState) {
                         freq = parsed.freq; q = parsed.q
                         gain = parsed.gain; type = parsed.type; enabled = parsed.enabled
                     }
-                }
+                    println("[BPControl/Desktop] PEQ[$i] freq=${parsed.freq} gain=${parsed.gain} type=${parsed.type} enabled=${parsed.enabled}")
+                } ?: println("[BPControl/Desktop] PEQ[$i] read returned null")
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
             }
+            println("[BPControl/Desktop] readDacSettings complete, activeSlot=0x${activeSlot.toInt().and(0xFF).toString(16)}")
         } finally {
             val presets = state.presets.value
             val matchIdx = state.identifyPreset(presets, eqBands)
