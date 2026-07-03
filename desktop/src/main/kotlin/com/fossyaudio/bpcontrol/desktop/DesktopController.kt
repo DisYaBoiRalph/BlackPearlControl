@@ -58,12 +58,6 @@ class DesktopController(private val state: AppUiState) {
     private var sendJob: Job? = null
     private var flashJob: Job? = null
 
-    // Working mutable EQ bands list (same pattern as MainActivity)
-    private val eqBands = MutableList(10) { i ->
-        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-        FilterBand(freq = defaultFreqs[i])
-    }
-
     private var firmwareVersion: String
         get() = state.firmwareVersion.value
         set(v) { state.updateFirmwareVersion(v) }
@@ -185,6 +179,8 @@ class DesktopController(private val state: AppUiState) {
     // ─── Initial settings readback ───────────────────────────────────────────
 
     private suspend fun readDacSettings() {
+        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+        val localBands = MutableList(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
         try {
             state.updateIsSyncing(true)
             println("[BPControl/Desktop] Starting readDacSettings")
@@ -261,14 +257,14 @@ class DesktopController(private val state: AppUiState) {
 
             // PEQ bands
             activeSlot = END
-            for (i in 0 until 10) {
+            for (i in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
                 pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
                     val parsed = mapper.parsePeqBand(data)
                     if (activeSlot == END && parsed.activeSlot != END) activeSlot = parsed.activeSlot
-                    eqBands[i].apply {
-                        freq = parsed.freq; q = parsed.q
-                        gain = parsed.gain; type = parsed.type; enabled = parsed.enabled
-                    }
+                    localBands[i] = FilterBand(
+                        freq = parsed.freq, q = parsed.q,
+                        gain = parsed.gain, type = parsed.type, enabled = parsed.enabled
+                    )
                     println("[BPControl/Desktop] PEQ[$i] freq=${parsed.freq} gain=${parsed.gain} type=${parsed.type} enabled=${parsed.enabled}")
                 } ?: println("[BPControl/Desktop] PEQ[$i] read returned null")
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
@@ -276,18 +272,18 @@ class DesktopController(private val state: AppUiState) {
             println("[BPControl/Desktop] readDacSettings complete, activeSlot=0x${activeSlot.toInt().and(0xFF).toString(16)}")
         } finally {
             val presets = state.presets.value
-            val matchIdx = state.identifyPreset(presets, eqBands)
+            val matchIdx = state.identifyPreset(presets, localBands)
             if (matchIdx != -1) {
                 state.updateCurrentPresetIndex(matchIdx)
             } else {
                 val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                 val nonePreset = presets.getOrNull(noneIdx)
                 if (nonePreset != null) {
-                    for (i in 0 until 10) nonePreset.bands[i] = eqBands[i].copy()
+                    presets[noneIdx] = nonePreset.copy(bands = localBands.toList())
                 }
                 state.updateCurrentPresetIndex(noneIdx)
             }
-            state.updateEqBands(eqBands)
+            state.updateEqBands(localBands)
             state.updateIsConnected(true)
             state.updateIsSyncing(false)
         }
@@ -407,12 +403,11 @@ class DesktopController(private val state: AppUiState) {
             val flatIdx = presets.indexOfFirst { it.name == "Flat" }.coerceAtLeast(0)
             state.updateCurrentPresetIndex(flatIdx)
             val flatPreset = presets.getOrNull(flatIdx)
-            eqBands.forEachIndexed { i, band ->
-                val src = flatPreset?.bands?.get(i) ?: return@forEachIndexed
-                band.apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
-                sendFilterUpdate(i, band, autoLatch = false)
+            val flatBands = flatPreset?.bands ?: emptyList()
+            flatBands.forEachIndexed { i, src ->
+                sendFilterUpdate(i, src, autoLatch = false)
             }
-            state.updateEqBands(eqBands)
+            state.updateEqBands(flatBands)
             latchSettings()
             sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
             state.updateIsSyncing(false)
@@ -420,12 +415,12 @@ class DesktopController(private val state: AppUiState) {
     }
 
     fun onBandUpdated(index: Int, band: FilterBand, presetStorage: DesktopPresetStorage) {
-        eqBands[index] = band.copy()
         sendFilterUpdate(index, band)
         val presets = state.presets.value
         val idx = state.currentPresetIndex.value
         if (idx in presets.indices) {
-            presets[idx].bands[index] = band.copy()
+            val p = presets[idx]
+            presets[idx] = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
             presetStorage.save(presets)
         }
         state.updateEqBand(index, band)
@@ -435,14 +430,10 @@ class DesktopController(private val state: AppUiState) {
         val presets = state.presets.value
         state.updateCurrentPresetIndex(index)
         val selected = presets.getOrNull(index) ?: return
-        eqBands.forEachIndexed { i, band ->
-            val src = selected.bands[i]
-            band.apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
-        }
-        state.updateEqBands(eqBands)
+        state.updateEqBands(selected.bands)
         scope.launch {
             state.updateIsMassPushing(true)
-            eqBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
+            selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
             latchSettings()
             delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS * 10)
             state.updateIsMassPushing(false)
@@ -452,7 +443,7 @@ class DesktopController(private val state: AppUiState) {
 
     fun onPresetSaved(name: String, presetStorage: DesktopPresetStorage) {
         val newPresets = state.presets.value.toMutableList()
-        newPresets.add(Preset(name, state.volumePercent.value, eqBands.map { it.copy() }.toMutableList()))
+        newPresets.add(Preset(name, state.volumePercent.value, state.eqBands.value.map { it.copy() }))
         state.updatePresets(newPresets)
         state.updateCurrentPresetIndex(newPresets.size - 1)
         presetStorage.save(newPresets)

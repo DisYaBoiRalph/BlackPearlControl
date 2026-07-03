@@ -149,12 +149,6 @@ class MainActivity : AppCompatActivity() {
     private var volumeDebounceJob: Job? = null
     private var isAppInFocus = false
 
-    // Working mutable EQ bands list; snapshots are pushed to ViewModel for Compose to observe
-    private val eqBands = MutableList(10) { i ->
-        val frequencies = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-        FilterBand(freq = frequencies[i])
-    }
-
     private val ACTION_USB_PERMISSION = "com.fossyaudio.bpcontrol.USB_PERMISSION"
     private lateinit var appContainer: AppContainer
     private lateinit var presetStorage: IPresetStorage
@@ -282,12 +276,10 @@ class MainActivity : AppCompatActivity() {
                                 val flatIdx = presets.indexOfFirst { it.name == "Flat" }.coerceAtLeast(0)
                                 currentPresetIndex = flatIdx
                                 val flatPreset = presets[flatIdx]
-                                eqBands.forEachIndexed { i, band ->
-                                    val src = flatPreset.bands[i]
-                                    band.apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
-                                    sendFilterUpdate(i, band, autoLatch = false)
+                                flatPreset.bands.forEachIndexed { i, src ->
+                                    sendFilterUpdate(i, src, autoLatch = false)
                                 }
-                                mainViewModel.updateEqBands(eqBands)
+                                mainViewModel.updateEqBands(flatPreset.bands)
                                 latchSettings()
                                 saveToFlash()
                                 isSyncing = false
@@ -295,10 +287,10 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                         onBandUpdated = { index, band ->
-                            eqBands[index] = band.copy()
                             sendFilterUpdate(index, band)
                             if (currentPresetIndex in presets.indices) {
-                                presets[currentPresetIndex].bands[index] = band.copy()
+                                val p = presets[currentPresetIndex]
+                                presets[currentPresetIndex] = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
                                 savePresetsToPrefs()
                             }
                             mainViewModel.updateEqBand(index, band)
@@ -306,14 +298,10 @@ class MainActivity : AppCompatActivity() {
                         onPresetLoaded = { index ->
                             currentPresetIndex = index
                             val selected = presets[index]
-                            eqBands.forEachIndexed { i, band ->
-                                val src = selected.bands[i]
-                                band.apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
-                            }
-                            mainViewModel.updateEqBands(eqBands)
+                            mainViewModel.updateEqBands(selected.bands)
                             lifecycleScope.launch(Dispatchers.IO) {
                                 isMassPushing = true
-                                eqBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
+                                selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
                                 latchSettings()
                                 while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
                                 isMassPushing = false
@@ -324,7 +312,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                         onPresetSaved = { name ->
-                            val clonedBands = eqBands.map { it.copy() }.toMutableList()
+                            val clonedBands = mainViewModel.eqBands.value.map { it.copy() }
                             val newPresets = presets.toMutableList()
                             newPresets.add(Preset(name, volumePercent, clonedBands))
                             mainViewModel.updatePresets(newPresets)
@@ -398,8 +386,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetUiToDefaults() {
         isSyncing = true
-        eqBands.forEach { it.enabled = false; it.gain = 0f }
-        mainViewModel.updateEqBands(eqBands)
+        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+        mainViewModel.updateEqBands(List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], enabled = false, gain = 0f) })
         mainViewModel.updateFilterIndex(-1)
         mainViewModel.updateGainModeIndex(-1)
         mainViewModel.updateAmpTopoIndex(-1)
@@ -541,6 +529,8 @@ class MainActivity : AppCompatActivity() {
     private fun readDacSettings() {
         if (usbConnection == null) return
         lifecycleScope.launch(Dispatchers.IO) {
+            val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
+            val localBands = MutableList(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
             try {
                 isSyncing = true
 
@@ -615,17 +605,17 @@ class MainActivity : AppCompatActivity() {
 
                 // 7. Read PEQ Bands
                 activeSlot = END
-                for (i in 0 until 10) {
+                for (i in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
                     pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
                         val parsedBand = dacSettingsMapper.parsePeqBand(data)
                         if (activeSlot == END && parsedBand.activeSlot != END) {
                             activeSlot = parsedBand.activeSlot
                             Log.d("BPControl/Protocol", "activeSlot=0x${activeSlot.toInt().and(0xFF).toString(16).uppercase(Locale.US)} confirmed from band $i")
                         }
-                        eqBands[i].apply {
-                            freq = parsedBand.freq; q = parsedBand.q
-                            gain = parsedBand.gain; type = parsedBand.type; enabled = parsedBand.enabled
-                        }
+                        localBands[i] = FilterBand(
+                            freq = parsedBand.freq, q = parsedBand.q,
+                            gain = parsedBand.gain, type = parsedBand.type, enabled = parsedBand.enabled
+                        )
                     }
                     delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
                 }
@@ -633,17 +623,16 @@ class MainActivity : AppCompatActivity() {
                     Log.w("BPControl/Protocol", "activeSlot is still END=0x00 after all PEQ reads — flash save may fail")
                 }
             } finally {
-                val matchIdx = identifyPreset(eqBands)
+                val matchIdx = identifyPreset(localBands)
                 if (matchIdx != -1) {
                     currentPresetIndex = matchIdx
                 } else {
                     val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                     val nonePreset = presets[noneIdx]
-                    nonePreset.preamp = volumePercent
-                    for (i in 0 until 10) nonePreset.bands[i] = eqBands[i].copy()
+                    presets[noneIdx] = nonePreset.copy(preamp = volumePercent, bands = localBands.toList())
                     currentPresetIndex = noneIdx
                 }
-                mainViewModel.updateEqBands(eqBands)
+                mainViewModel.updateEqBands(localBands)
                 mainViewModel.updateIsConnected(true)
                 isSyncing = false
             }
@@ -705,23 +694,18 @@ class MainActivity : AppCompatActivity() {
                 if (result.preamp < 0) {
                     volumePercent = (volumePercent + (result.preamp * 2)).coerceIn(0f, 100f)
                 }
-                for (i in 0 until 10) {
-                    if (i < result.bands.size) {
-                        val src = result.bands[i]
-                        eqBands[i].apply { enabled = src.enabled; type = src.type; freq = src.freq; gain = src.gain; q = src.q }
-                    } else {
-                        eqBands[i].apply { enabled = false; type = FilterType.PK; freq = defaultFreqs[i]; gain = 0f; q = 1.0f }
-                    }
+                val localBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i ->
+                    if (i < result.bands.size) result.bands[i].copy()
+                    else FilterBand(enabled = false, type = FilterType.PK, freq = defaultFreqs[i], gain = 0f, q = 1.0f)
                 }
                 val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                 val nonePreset = presets[noneIdx]
-                nonePreset.preamp = volumePercent
-                for (i in 0 until 10) nonePreset.bands[i] = eqBands[i].copy()
+                presets[noneIdx] = nonePreset.copy(preamp = volumePercent, bands = localBands)
                 currentPresetIndex = noneIdx
-                mainViewModel.updateEqBands(eqBands)
+                mainViewModel.updateEqBands(localBands)
 
                 isMassPushing = true
-                eqBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
+                localBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
                 latchSettings()
                 while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
                 delay(BlackPearlProtocol.Timing.MASS_PUSH_SETTLE_DELAY_MS)
