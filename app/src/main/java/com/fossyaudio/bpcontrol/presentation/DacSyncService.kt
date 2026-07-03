@@ -71,7 +71,7 @@ class DacSyncService(
                     delay(BlackPearlProtocol.Timing.READ_POLL_INTERVAL_MS)
                 }
                 null
-            } catch (e: Exception) {
+            } catch (e: java.io.IOException) {
                 Log.e("USB", "Read command failed for cmd=${cmd.toUByte().toString(16)}", e)
                 null
             }

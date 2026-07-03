@@ -51,7 +51,7 @@ class PresetRepository(
                     }
                     loaded.add(Preset(name, preamp, bList))
                 }
-            } catch (e: Exception) {
+            } catch (e: org.json.JSONException) {
                 Log.e("Presets", "JSON Parse Error", e)
             }
         }
