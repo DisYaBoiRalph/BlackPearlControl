@@ -16,7 +16,7 @@ class MainViewModelTest {
     fun calculate_headroom_matches_expected_for_50_percent() {
         val vm = MainViewModel()
 
-        val actual = vm.calculateHeadroomDb(50f, minRawVolume, maxRawVolume)
+        val actual = vm.uiState.calculateHeadroomDb(50f, minRawVolume, maxRawVolume)
         val expected = 31.078125f // ((6440 - -1516) / 256)
 
         assertEquals(expected, actual)
@@ -26,8 +26,8 @@ class MainViewModelTest {
     fun calculate_headroom_clamps_when_volume_is_out_of_range() {
         val vm = MainViewModel()
 
-        val belowMin = vm.calculateHeadroomDb(-20f, minRawVolume, maxRawVolume)
-        val aboveMax = vm.calculateHeadroomDb(140f, minRawVolume, maxRawVolume)
+        val belowMin = vm.uiState.calculateHeadroomDb(-20f, minRawVolume, maxRawVolume)
+        val aboveMax = vm.uiState.calculateHeadroomDb(140f, minRawVolume, maxRawVolume)
 
         assertEquals((maxRawVolume - minRawVolume).toFloat() / 256f, belowMin)
         assertEquals(0f, aboveMax)
@@ -46,7 +46,7 @@ class MainViewModelTest {
         val custom = Preset("Custom", 0f, customBands)
         val none = Preset("None", 0f, List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
-        val match = vm.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
+        val match = vm.uiState.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
 
         assertEquals(1, match)
     }

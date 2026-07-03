@@ -58,12 +58,12 @@ class MainActivity : AppCompatActivity() {
     // --- Convenience property delegates backed by ViewModel StateFlow ---
 
     private var presets: MutableList<Preset>
-        get() = mainViewModel.presets.value
-        set(value) { mainViewModel.updatePresets(value) }
+        get() = mainViewModel.uiState.presets.value
+        set(value) { mainViewModel.uiState.updatePresets(value) }
 
     private var currentPresetIndex: Int
-        get() = mainViewModel.currentPresetIndex.value
-        set(value) { mainViewModel.updateCurrentPresetIndex(value) }
+        get() = mainViewModel.uiState.currentPresetIndex.value
+        set(value) { mainViewModel.uiState.updateCurrentPresetIndex(value) }
 
     private val filterOptions = arrayOf("FAST-LL", "Fast-PC (BEST)", "Slow-LL", "SLOW-PC", "NOS")
     private val gainOptions = arrayOf("LOW", "HIGH")
@@ -104,40 +104,40 @@ class MainActivity : AppCompatActivity() {
     }
 
     private var volumePercent: Float
-        get() = mainViewModel.volumePercent.value
-        set(value) { mainViewModel.updateVolumePercent(value) }
+        get() = mainViewModel.uiState.volumePercent.value
+        set(value) { mainViewModel.uiState.updateVolumePercent(value) }
 
     private var isSyncing: Boolean
-        get() = mainViewModel.isSyncing.value
-        set(value) { mainViewModel.updateIsSyncing(value) }
+        get() = mainViewModel.uiState.isSyncing.value
+        set(value) { mainViewModel.uiState.updateIsSyncing(value) }
 
     private var isMassPushing: Boolean
-        get() = mainViewModel.isMassPushing.value
-        set(value) { mainViewModel.updateIsMassPushing(value) }
+        get() = mainViewModel.uiState.isMassPushing.value
+        set(value) { mainViewModel.uiState.updateIsMassPushing(value) }
 
     private var dacBalLeft: Int
-        get() = mainViewModel.dacBalLeft.value
-        set(value) { mainViewModel.updateDacBalance(value, dacBalRight) }
+        get() = mainViewModel.uiState.dacBalLeft.value
+        set(value) { mainViewModel.uiState.updateDacBalance(value, dacBalRight) }
 
     private var dacBalRight: Int
-        get() = mainViewModel.dacBalRight.value
-        set(value) { mainViewModel.updateDacBalance(dacBalLeft, value) }
+        get() = mainViewModel.uiState.dacBalRight.value
+        set(value) { mainViewModel.uiState.updateDacBalance(dacBalLeft, value) }
 
     private var activeSlot: Byte
-        get() = mainViewModel.activeSlot.value
-        set(value) { mainViewModel.updateActiveSlot(value) }
+        get() = mainViewModel.uiState.activeSlot.value
+        set(value) { mainViewModel.uiState.updateActiveSlot(value) }
 
     private var firmwareVersion: String
-        get() = mainViewModel.firmwareVersion.value
-        set(value) { mainViewModel.updateFirmwareVersion(value) }
+        get() = mainViewModel.uiState.firmwareVersion.value
+        set(value) { mainViewModel.uiState.updateFirmwareVersion(value) }
 
     private var lastSentPeqIndex: Int
-        get() = mainViewModel.lastSentPeqIndex.value
-        set(value) { mainViewModel.updateLastSentPeq(value, lastSentFilter) }
+        get() = mainViewModel.uiState.lastSentPeqIndex.value
+        set(value) { mainViewModel.uiState.updateLastSentPeq(value, lastSentFilter) }
 
     private var lastSentFilter: FilterBand?
-        get() = mainViewModel.lastSentFilter.value
-        set(value) { mainViewModel.updateLastSentPeq(lastSentPeqIndex, value) }
+        get() = mainViewModel.uiState.lastSentFilter.value
+        set(value) { mainViewModel.uiState.updateLastSentPeq(lastSentPeqIndex, value) }
 
     // Local UI-interaction guards (not in ViewModel — only needed by polling interlock)
     private var isUserTouchingSlider = false
@@ -234,32 +234,32 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                         onBalanceChange = { value ->
-                            mainViewModel.updateBalanceValue(value)
+                            mainViewModel.uiState.updateBalanceValue(value)
                             updateBalance(value.toInt())
                         },
                         onFilterSelected = { position ->
                             if (!isSyncing) {
-                                mainViewModel.updateFilterIndex(position)
+                                mainViewModel.uiState.updateFilterIndex(position)
                                 sendHidCommand(byteArrayOf(WRITE, CMD_FILTER, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, (position + 1).toByte(), END))
                                 debouncedSaveToFlash()
                             }
                         },
                         onGainModeSelected = { position ->
                             if (!isSyncing) {
-                                mainViewModel.updateGainModeIndex(position)
+                                mainViewModel.uiState.updateGainModeIndex(position)
                                 sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, position.toByte(), END))
                                 debouncedSaveToFlash()
                             }
                         },
                         onAmpTopoSelected = { position ->
                             if (!isSyncing) {
-                                mainViewModel.updateAmpTopoIndex(position)
+                                mainViewModel.uiState.updateAmpTopoIndex(position)
                                 sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, position.toByte(), END))
                                 debouncedSaveToFlash()
                             }
                         },
                         onMicGainChange = { value ->
-                            mainViewModel.updateMicGainDb(value)
+                            mainViewModel.uiState.updateMicGainDb(value)
                             sendHidCommand(byteArrayOf(WRITE, CMD_MIC_GAIN, BlackPearlProtocol.Param.MIC_GAIN_LENGTH, BlackPearlProtocol.Param.MIC_GAIN_SIGNED_FLAG, (value.toInt() and 0xFF).toByte()))
                             latchSettings()
                             debouncedSaveToFlash()
@@ -279,7 +279,7 @@ class MainActivity : AppCompatActivity() {
                                 flatPreset.bands.forEachIndexed { i, src ->
                                     sendFilterUpdate(i, src, autoLatch = false)
                                 }
-                                mainViewModel.updateEqBands(flatPreset.bands)
+                                mainViewModel.uiState.updateEqBands(flatPreset.bands)
                                 latchSettings()
                                 saveToFlash()
                                 isSyncing = false
@@ -293,12 +293,12 @@ class MainActivity : AppCompatActivity() {
                                 presets[currentPresetIndex] = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
                                 savePresetsToPrefs()
                             }
-                            mainViewModel.updateEqBand(index, band)
+                            mainViewModel.uiState.updateEqBand(index, band)
                         },
                         onPresetLoaded = { index ->
                             currentPresetIndex = index
                             val selected = presets[index]
-                            mainViewModel.updateEqBands(selected.bands)
+                            mainViewModel.uiState.updateEqBands(selected.bands)
                             lifecycleScope.launch(Dispatchers.IO) {
                                 isMassPushing = true
                                 selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
@@ -312,10 +312,10 @@ class MainActivity : AppCompatActivity() {
                             }
                         },
                         onPresetSaved = { name ->
-                            val clonedBands = mainViewModel.eqBands.value.map { it.copy() }
+                            val clonedBands = mainViewModel.uiState.eqBands.value.map { it.copy() }
                             val newPresets = presets.toMutableList()
                             newPresets.add(Preset(name, volumePercent, clonedBands))
-                            mainViewModel.updatePresets(newPresets)
+                            mainViewModel.uiState.updatePresets(newPresets)
                             currentPresetIndex = newPresets.size - 1
                             savePresetsToPrefs()
                         },
@@ -326,7 +326,7 @@ class MainActivity : AppCompatActivity() {
                                 newPresets.removeAt(originalIndex)
                                 if (currentPresetIndex == originalIndex) currentPresetIndex = 0
                                 else if (currentPresetIndex > originalIndex) currentPresetIndex--
-                                mainViewModel.updatePresets(newPresets)
+                                mainViewModel.uiState.updatePresets(newPresets)
                                 savePresetsToPrefs()
                                 Toast.makeText(this@MainActivity, "Preset Deleted", Toast.LENGTH_SHORT).show()
                             }
@@ -359,11 +359,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun calculateHeadroomDb(volPercent: Float): Float =
-        mainViewModel.calculateHeadroomDb(volPercent, VOL_MIN_RAW, VOL_MAX_RAW)
+        mainViewModel.uiState.calculateHeadroomDb(volPercent, VOL_MIN_RAW, VOL_MAX_RAW)
 
     private fun loadPresetsFromPrefs() {
         val loaded = presetStorage.load()
-        mainViewModel.updatePresets(loaded)
+        mainViewModel.uiState.updatePresets(loaded)
     }
 
     private fun savePresetsToPrefs() {
@@ -371,7 +371,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun identifyPreset(hwBands: List<FilterBand>): Int =
-        mainViewModel.identifyPreset(presets, hwBands)
+        mainViewModel.uiState.identifyPreset(presets, hwBands)
 
     private fun startConnectionWatchdog() {
         usbConnectionManager.startConnectionWatchdog(lifecycleScope) {
@@ -387,13 +387,13 @@ class MainActivity : AppCompatActivity() {
     private fun resetUiToDefaults() {
         isSyncing = true
         val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-        mainViewModel.updateEqBands(List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], enabled = false, gain = 0f) })
-        mainViewModel.updateFilterIndex(-1)
-        mainViewModel.updateGainModeIndex(-1)
-        mainViewModel.updateAmpTopoIndex(-1)
-        mainViewModel.updateBalanceValue(0f)
-        mainViewModel.updateMicGainDb(0f)
-        mainViewModel.updateIsConnected(false)
+        mainViewModel.uiState.updateEqBands(List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], enabled = false, gain = 0f) })
+        mainViewModel.uiState.updateFilterIndex(-1)
+        mainViewModel.uiState.updateGainModeIndex(-1)
+        mainViewModel.uiState.updateAmpTopoIndex(-1)
+        mainViewModel.uiState.updateBalanceValue(0f)
+        mainViewModel.uiState.updateMicGainDb(0f)
+        mainViewModel.uiState.updateIsConnected(false)
         isSyncing = false
     }
 
@@ -554,21 +554,21 @@ class MainActivity : AppCompatActivity() {
                 // 1. Read Filter
                 pullValueSync(CMD_FILTER, END, END)?.let { data ->
                     val value = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
-                    mainViewModel.updateFilterIndex(value - 1)
+                    mainViewModel.uiState.updateFilterIndex(value - 1)
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 2. Read Gain Mode
                 pullValueSync(CMD_GAIN_MODE, END, END)?.let { data ->
                     val value = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
-                    mainViewModel.updateGainModeIndex(value)
+                    mainViewModel.uiState.updateGainModeIndex(value)
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
                 // 3. Read Amp Topo
                 pullValueSync(CMD_AMP_TOPO, END, END)?.let { data ->
                     val value = data[BlackPearlProtocol.ParserOffset.VALUE_LSB].toInt()
-                    mainViewModel.updateAmpTopoIndex(value)
+                    mainViewModel.uiState.updateAmpTopoIndex(value)
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
@@ -582,7 +582,7 @@ class MainActivity : AppCompatActivity() {
 
                 // 5. Read Mic Gain
                 pullValueSync(CMD_MIC_GAIN, BlackPearlProtocol.Param.MIC_GAIN_PAGE, BlackPearlProtocol.Param.MIC_GAIN_PAGE)?.let { data ->
-                    mainViewModel.updateMicGainDb(dacSettingsMapper.parseMicGainDb(data).toFloat())
+                    mainViewModel.uiState.updateMicGainDb(dacSettingsMapper.parseMicGainDb(data).toFloat())
                 }
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
 
@@ -601,7 +601,7 @@ class MainActivity : AppCompatActivity() {
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
                 val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
                 val finalBal = if (abs(combined) <= 1) 0f else combined.toFloat()
-                mainViewModel.updateBalanceValue(finalBal.coerceIn(-15f, 15f))
+                mainViewModel.uiState.updateBalanceValue(finalBal.coerceIn(-15f, 15f))
 
                 // 7. Read PEQ Bands
                 activeSlot = END
@@ -632,8 +632,8 @@ class MainActivity : AppCompatActivity() {
                     presets[noneIdx] = nonePreset.copy(preamp = volumePercent, bands = localBands.toList())
                     currentPresetIndex = noneIdx
                 }
-                mainViewModel.updateEqBands(localBands)
-                mainViewModel.updateIsConnected(true)
+                mainViewModel.uiState.updateEqBands(localBands)
+                mainViewModel.uiState.updateIsConnected(true)
                 isSyncing = false
             }
         }
@@ -702,7 +702,7 @@ class MainActivity : AppCompatActivity() {
                 val nonePreset = presets[noneIdx]
                 presets[noneIdx] = nonePreset.copy(preamp = volumePercent, bands = localBands)
                 currentPresetIndex = noneIdx
-                mainViewModel.updateEqBands(localBands)
+                mainViewModel.uiState.updateEqBands(localBands)
 
                 isMassPushing = true
                 localBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
