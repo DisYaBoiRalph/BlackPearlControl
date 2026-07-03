@@ -37,11 +37,13 @@ class MainViewModelTest {
         val vm = MainViewModel()
         val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
-        val flat = Preset("Flat", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
-        val custom = Preset("Custom", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
-        val none = Preset("None", 0f, MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
-
-        custom.bands[1] = FilterBand(enabled = true, type = FilterType.LS, freq = 63, gain = 2.0f, q = 0.8f)
+        val flat = Preset("Flat", 0f, List(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
+        val customBands = List(10) { i ->
+            if (i == 1) FilterBand(enabled = true, type = FilterType.LS, freq = 63, gain = 2.0f, q = 0.8f)
+            else FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK)
+        }
+        val custom = Preset("Custom", 0f, customBands)
+        val none = Preset("None", 0f, List(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
         val match = vm.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
 

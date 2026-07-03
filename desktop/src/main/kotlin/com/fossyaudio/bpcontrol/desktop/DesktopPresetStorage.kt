@@ -4,6 +4,7 @@ import com.fossyaudio.bpcontrol.data.IPresetStorage
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.charset.StandardCharsets
@@ -31,7 +32,7 @@ class DesktopPresetStorage(
                     val preamp = pObj.optDouble("preamp", 0.0).toFloat()
                     val bArray = pObj.optJSONArray("filters") ?: JSONArray()
                     val bList = mutableListOf<FilterBand>()
-                    for (b in 0 until 10) {
+                    for (b in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
                         if (b < bArray.length()) {
                             val bObj = bArray.getJSONObject(b)
                             bList.add(
@@ -89,7 +90,7 @@ class DesktopPresetStorage(
                 Preset(
                     name = "Flat",
                     preamp = 0f,
-                    bands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
+                    bands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
                 )
             )
         }
@@ -99,7 +100,7 @@ class DesktopPresetStorage(
                 Preset(
                     name = "None",
                     preamp = 0f,
-                    bands = MutableList(10) { i -> FilterBand(freq = defaultFreqs[i]) }
+                    bands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
                 )
             )
         }

@@ -1,9 +1,9 @@
 package com.fossyaudio.bpcontrol.shared.model
 
 data class FilterBand(
-    var enabled: Boolean = true,
-    var type: FilterType = FilterType.PK,
-    var freq: Int = 1000,
-    var gain: Float = 0.0f,
-    var q: Float = 1.0f
+    val enabled: Boolean = true,
+    val type: FilterType = FilterType.PK,
+    val freq: Int = 1000,
+    val gain: Float = 0.0f,
+    val q: Float = 1.0f
 )
