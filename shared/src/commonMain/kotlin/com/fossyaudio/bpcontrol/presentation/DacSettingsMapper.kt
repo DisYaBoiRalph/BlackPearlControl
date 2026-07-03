@@ -19,6 +19,11 @@ class DacSettingsMapper(
     private val maxRawVolume: Int,
     var profile: BlackPearlProtocol.FirmwareProfile = BlackPearlProtocol.FirmwareProfile.CB
 ) {
+    fun rawVolumeFromPercent(volumePercent: Float): Int {
+        val raw = (minRawVolume + (volumePercent / 100.0) * (maxRawVolume - minRawVolume)).toInt()
+        return raw.coerceIn(minRawVolume, maxRawVolume)
+    }
+
     fun parseVolumePercentOrNull(data: ByteArray): Float? {
         val rawVol = BlackPearlCodec.readSigned16LE(
             data,

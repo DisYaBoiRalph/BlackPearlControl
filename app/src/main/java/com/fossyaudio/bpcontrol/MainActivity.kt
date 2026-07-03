@@ -474,8 +474,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateHardwareVolume(latchAndSave: Boolean = true) {
         if (usbConnection == null) return
-        val totalRaw = (VOL_MIN_RAW + (volumePercent / 100.0) * (VOL_MAX_RAW - VOL_MIN_RAW)).toInt()
-        val clampedRaw = totalRaw.coerceIn(VOL_MIN_RAW, VOL_MAX_RAW)
+        val clampedRaw = dacSettingsMapper.rawVolumeFromPercent(volumePercent)
         sendHidCommand(byteArrayOf(WRITE, CMD_GLOBAL_GAIN, BlackPearlProtocol.Param.GLOBAL_GAIN_LENGTH, (clampedRaw and 0xFF).toByte(), (clampedRaw shr 8).toByte(), END))
         if (latchAndSave) {
             latchSettings()
