@@ -161,6 +161,7 @@ class MainActivity : AppCompatActivity() {
 
     private val flashHandler = Handler(Looper.getMainLooper())
     private val flashRunnable = Runnable { saveToFlash() }
+    private val balanceHandler = Handler(Looper.getMainLooper())
 
     private val usbCommandQueueProcessor by lazy {
         UsbCommandQueueProcessor(
@@ -488,7 +489,7 @@ class MainActivity : AppCompatActivity() {
         val balanceLeftSelector = BlackPearlProtocol.BalanceSelector.leftChannelSelector(firmwareVersion)
         val balanceRightSelector = BlackPearlProtocol.BalanceSelector.rightChannelSelector(firmwareVersion)
         sendHidCommand(byteArrayOf(WRITE, CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, balanceLeftSelector, END, magL.toByte()))
-        Handler(Looper.getMainLooper()).postDelayed({
+        balanceHandler.postDelayed({
             sendHidCommand(byteArrayOf(WRITE, CMD_BALANCE, BlackPearlProtocol.Param.BALANCE_LENGTH, balanceRightSelector, END, magR.toByte()))
             latchSettings()
             debouncedSaveToFlash()
