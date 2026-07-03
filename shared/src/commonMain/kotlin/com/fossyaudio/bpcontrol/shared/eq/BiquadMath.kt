@@ -64,8 +64,10 @@ object BiquadMath {
 
     fun magnitudeDb(freq: Double, band: FilterBand, fs: Double = 48000.0): Double {
         if (kotlin.math.abs(band.gain) < 0.1f) return 0.0
+        return magnitudeDb(freq, coefficients(band, band.gain, fs))
+    }
 
-        val coeffs = coefficients(band, band.gain, fs)
+    fun magnitudeDb(freq: Double, coeffs: BiquadCoefficients, fs: Double = 48000.0): Double {
         val w = 2.0 * PI * freq / fs
         val b0 = coeffs.b0.toDouble()
         val b1 = coeffs.b1.toDouble()

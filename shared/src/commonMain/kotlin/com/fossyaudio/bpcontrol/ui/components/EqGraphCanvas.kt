@@ -64,11 +64,14 @@ fun EqGraphCanvas(
             Path().apply {
                 if (widthPx <= 1f || heightPx <= 1f || bands.isEmpty()) return@apply
                 val sampleStepPx = 4
+                val activeBandCoeffs = bands
+                    .filter { it.enabled && kotlin.math.abs(it.gain) >= 0.1f }
+                    .map { it to BiquadMath.coefficients(it) }
                 for (px in 0..widthPx.toInt() step sampleStepPx) {
                     val freq = freqForX(px.toFloat()).coerceAtMost(22000.0)
                     var totalGainDb = 0.0
-                    for (band in bands) {
-                        if (band.enabled) totalGainDb += BiquadMath.magnitudeDb(freq, band)
+                    for ((_, coeffs) in activeBandCoeffs) {
+                        totalGainDb += BiquadMath.magnitudeDb(freq, coeffs)
                     }
                     val rawY = midY - (totalGainDb.toFloat() * dBScale)
                     val y = if (rawY.isNaN() || rawY.isInfinite()) midY else rawY
