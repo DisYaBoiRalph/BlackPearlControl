@@ -3,6 +3,7 @@ package com.fossyaudio.bpcontrol.presentation
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,7 +36,6 @@ class MainViewModelTest {
 
     @Test
     fun identify_preset_delegates_to_preset_matcher_logic() {
-        val vm = MainViewModel()
         val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
         val flat = Preset("Flat", 0f, List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
@@ -46,7 +46,7 @@ class MainViewModelTest {
         val custom = Preset("Custom", 0f, customBands)
         val none = Preset("None", 0f, List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
-        val match = vm.uiState.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
+        val match = PresetMatcher.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
 
         assertEquals(1, match)
     }

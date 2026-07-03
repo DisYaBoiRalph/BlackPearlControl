@@ -4,6 +4,7 @@ import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import com.fossyaudio.bpcontrol.ui.AppUiState
@@ -272,7 +273,7 @@ class DesktopController(private val state: AppUiState) {
             println("[BPControl/Desktop] readDacSettings complete, activeSlot=0x${activeSlot.toInt().and(0xFF).toString(16)}")
         } finally {
             val presets = state.presets.value
-            val matchIdx = state.identifyPreset(presets, localBands)
+            val matchIdx = PresetMatcher.identifyPreset(presets, localBands)
             if (matchIdx != -1) {
                 state.updateCurrentPresetIndex(matchIdx)
             } else {

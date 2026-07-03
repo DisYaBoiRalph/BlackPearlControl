@@ -34,6 +34,7 @@ import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import com.fossyaudio.bpcontrol.transport.usb.UsbCommandQueueProcessor
@@ -372,7 +373,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun identifyPreset(hwBands: List<FilterBand>): Int =
-        mainViewModel.uiState.identifyPreset(presets, hwBands)
+        PresetMatcher.identifyPreset(presets, hwBands)
 
     private fun startConnectionWatchdog() {
         usbConnectionManager.startConnectionWatchdog(lifecycleScope) {
