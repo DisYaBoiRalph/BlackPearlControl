@@ -61,7 +61,7 @@ class AppUiState {
 
     // --- EQ bands ---
     private val _eqBands = MutableStateFlow<List<FilterBand>>(
-        List(10) { i -> FilterBand(freq = defaultFreqs[i]) }
+        List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
     )
     val eqBands: StateFlow<List<FilterBand>> = _eqBands.asStateFlow()
     fun updateEqBands(bands: List<FilterBand>) { _eqBands.value = bands.map { it.copy() } }

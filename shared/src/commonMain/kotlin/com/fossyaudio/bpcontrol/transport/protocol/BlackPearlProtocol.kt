@@ -16,6 +16,7 @@ object BlackPearlProtocol {
         const val REPORT_SIZE = 64
         const val QUEUED_PAYLOAD_MAX_SIZE = 63
         const val PEQ_PAYLOAD_SIZE = 60
+        const val BAND_COUNT = 10
         const val END: Byte = 0x00
         const val FILL: Byte = 0xFF.toByte()
         const val WRITE: Byte = 0x01

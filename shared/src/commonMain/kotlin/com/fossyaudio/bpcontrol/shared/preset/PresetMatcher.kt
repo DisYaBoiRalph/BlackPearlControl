@@ -3,6 +3,7 @@ package com.fossyaudio.bpcontrol.shared.preset
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlin.math.abs
 
 object PresetMatcher {
@@ -11,7 +12,7 @@ object PresetMatcher {
             if (presets[i].name == "None") continue
             var match = true
 
-            for (b in 0 until 10) {
+            for (b in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
                 val hw = hwBands[b]
                 val saved = presets[i].bands[b]
 
