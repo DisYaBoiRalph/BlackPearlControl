@@ -16,9 +16,10 @@ jobs:
         with:
           java-version: "17"
           distribution: "temurin"
+          cache: "gradle"
 
       - name: Build debug APK
-        run: ./gradlew assembleDebug
+        run: ./gradlew assembleDebug --configuration-cache
 
       - name: Resolve APK path
         id: paths
@@ -41,9 +42,10 @@ jobs:
         with:
           java-version: "17"
           distribution: "temurin"
+          cache: "gradle"
 
       - name: Build portable distributable
-        run: .\gradlew.bat :desktop:createDistributable
+        run: .\gradlew.bat :desktop:createDistributable --configuration-cache
 
       - name: Compute release tag
         id: tag
