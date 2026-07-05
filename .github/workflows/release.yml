@@ -1,121 +1,121 @@
 name: Release
 
 on:
-    workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-    build-android:
-        name: Build Android APK
-        runs-on: ubuntu-latest
-        outputs:
-            apk-path: ${{ steps.paths.outputs.apk }}
-        steps:
-            - uses: actions/checkout@v4
+  build-android:
+    name: Build Android APK
+    runs-on: ubuntu-latest
+    outputs:
+      apk-path: ${{ steps.paths.outputs.apk }}
+    steps:
+      - uses: actions/checkout@v4
 
-            - uses: actions/setup-java@v4
-              with:
-                  java-version: "17"
-                  distribution: "temurin"
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
 
-            - name: Build debug APK
-              run: ./gradlew assembleDebug
+      - name: Build debug APK
+        run: ./gradlew assembleDebug
 
-            - name: Resolve APK path
-              id: paths
-              run: echo "apk=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_OUTPUT"
+      - name: Resolve APK path
+        id: paths
+        run: echo "apk=app/build/outputs/apk/debug/app-debug.apk" >> "$GITHUB_OUTPUT"
 
-            - uses: actions/upload-artifact@v4
-              with:
-                  name: android-apk
-                  path: app/build/outputs/apk/debug/app-debug.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
 
-    build-desktop:
-        name: Build Desktop (Windows)
-        runs-on: windows-latest
-        outputs:
-            zip-name: ${{ steps.zip.outputs.name }}
-        steps:
-            - uses: actions/checkout@v4
+  build-desktop:
+    name: Build Desktop (Windows)
+    runs-on: windows-latest
+    outputs:
+      zip-name: ${{ steps.zip.outputs.name }}
+    steps:
+      - uses: actions/checkout@v4
 
-            - uses: actions/setup-java@v4
-              with:
-                  java-version: "17"
-                  distribution: "temurin"
+      - uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
 
-            - name: Build portable distributable
-              run: .\gradlew.bat :desktop:createDistributable
+      - name: Build portable distributable
+        run: .\gradlew.bat :desktop:createDistributable
 
-            - name: Compute release tag
-              id: tag
-              shell: pwsh
-              run: |
-                  $version = (Select-String -Path "app/build.gradle.kts" -Pattern 'versionName = "(.+)"').Matches[0].Groups[1].Value
-                  $sha     = git rev-parse --short HEAD
-                  $branch  = "${{ github.ref_name }}"
-                  if ($branch -eq "main") {
-                    $tag = "v$version"
-                  } else {
-                    $tag = "v$version-$sha"
-                  }
-                  "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      - name: Compute release tag
+        id: tag
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path "app/build.gradle.kts" -Pattern 'versionName = "(.+)"').Matches[0].Groups[1].Value
+          $sha     = git rev-parse --short HEAD
+          $branch  = "${{ github.ref_name }}"
+          if ($branch -eq "main") {
+            $tag = "v$version"
+          } else {
+            $tag = "v$version-$sha"
+          }
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-            - name: ZIP desktop distributable
-              id: zip
-              shell: pwsh
-              run: |
-                  $name = "BlackPearlControl-${{ steps.tag.outputs.tag }}-windows-portable.zip"
-                  Compress-Archive -Path "desktop/build/compose/binaries/main/app/desktop" -DestinationPath $name
-                  "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+      - name: ZIP desktop distributable
+        id: zip
+        shell: pwsh
+        run: |
+          $name = "BlackPearlControl-${{ steps.tag.outputs.tag }}-windows-portable.zip"
+          Compress-Archive -Path "desktop/build/compose/binaries/main/app/BlackPearlControl" -DestinationPath $name
+          "name=$name" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
 
-            - uses: actions/upload-artifact@v4
-              with:
-                  name: desktop-zip
-                  path: ${{ steps.zip.outputs.name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-zip
+          path: ${{ steps.zip.outputs.name }}
 
-    release:
-        name: Create GitHub Release
-        needs: [build-android, build-desktop]
-        runs-on: ubuntu-latest
-        permissions:
-            contents: write
-        steps:
-            - uses: actions/checkout@v4
+  release:
+    name: Create GitHub Release
+    needs: [build-android, build-desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
 
-            - name: Compute release metadata
-              id: meta
-              run: |
-                  VERSION=$(grep 'versionName = ' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)".*/\1/')
-                  SHA=$(git rev-parse --short HEAD)
-                  BRANCH="${{ github.ref_name }}"
-                  if [ "$BRANCH" = "main" ]; then
-                    TAG="v${VERSION}"
-                    PRERELEASE="false"
-                  else
-                    TAG="v${VERSION}-${SHA}"
-                    PRERELEASE="true"
-                  fi
-                  echo "tag=${TAG}"        >> "$GITHUB_OUTPUT"
-                  echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-                  echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+      - name: Compute release metadata
+        id: meta
+        run: |
+          VERSION=$(grep 'versionName = ' app/build.gradle.kts | sed 's/.*versionName = "\(.*\)".*/\1/')
+          SHA=$(git rev-parse --short HEAD)
+          BRANCH="${{ github.ref_name }}"
+          if [ "$BRANCH" = "main" ]; then
+            TAG="v${VERSION}"
+            PRERELEASE="false"
+          else
+            TAG="v${VERSION}-${SHA}"
+            PRERELEASE="true"
+          fi
+          echo "tag=${TAG}"        >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
 
-            - uses: actions/download-artifact@v4
-              with:
-                  name: android-apk
-                  path: artifacts/
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: artifacts/
 
-            - uses: actions/download-artifact@v4
-              with:
-                  name: desktop-zip
-                  path: artifacts/
+      - uses: actions/download-artifact@v4
+        with:
+          name: desktop-zip
+          path: artifacts/
 
-            - name: Rename APK with version
-              run: mv artifacts/app-debug.apk "artifacts/BlackPearlControl-${{ steps.meta.outputs.tag }}.apk"
+      - name: Rename APK with version
+        run: mv artifacts/app-debug.apk "artifacts/BlackPearlControl-${{ steps.meta.outputs.tag }}.apk"
 
-            - name: Publish release
-              uses: softprops/action-gh-release@v2
-              with:
-                  tag_name: ${{ steps.meta.outputs.tag }}
-                  name: ${{ steps.meta.outputs.tag }}
-                  prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-                  generate_release_notes: true
-                  files: artifacts/*
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.tag }}
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+          files: artifacts/*

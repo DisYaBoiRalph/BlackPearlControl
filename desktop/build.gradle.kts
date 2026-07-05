@@ -29,6 +29,10 @@ compose.desktop {
             }.get().metadata.installationPath.asFile.absolutePath
         nativeDistributions {
             targetFormats(TargetFormat.Exe)
+            packageName = "BlackPearlControl"
+            windows {
+                iconFile = project.file("src/main/resources/icon.ico")
+            }
         }
     }
 }
