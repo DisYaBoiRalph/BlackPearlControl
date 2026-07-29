@@ -109,6 +109,8 @@ fun EqScreen(state: AppUiState, actions: AppActions) {
             eqBands = eqBands,
             state = bandsListState,
             onBandUpdated = actions.onBandUpdated,
+            selectedIndex = selectedIndex,
+            onBandSelected = { selectedIndex = it },
             modifier = Modifier.weight(1f),
         )
     }
@@ -321,6 +323,8 @@ private fun EqBandsList(
     eqBands: List<FilterBand>,
     state: ScrollState,
     onBandUpdated: (Int, FilterBand) -> Unit,
+    selectedIndex: Int,
+    onBandSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -333,6 +337,8 @@ private fun EqBandsList(
             EqBandRow(
                 band = band,
                 onUpdate = onUpdate,
+                selected = index == selectedIndex,
+                onSelect = { onBandSelected(index) },
                 modifier = Modifier.fillMaxWidth(),
             )
             if (index < eqBands.lastIndex) HorizontalDivider()
