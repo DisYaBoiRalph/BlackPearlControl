@@ -32,6 +32,8 @@ import com.fossyaudio.bpcontrol.presentation.DacSyncService
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
+import com.fossyaudio.bpcontrol.shared.audio.volDbToPct
+import com.fossyaudio.bpcontrol.shared.audio.volPctToDb
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
@@ -692,7 +694,10 @@ class MainActivity : AppCompatActivity() {
                 }
                 val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
                 if (result.preamp < 0) {
-                    volumePercent = (volumePercent + (result.preamp * 2)).coerceIn(0f, 100f)
+                    // AutoEQ preamp is a dB attenuation; apply it on the dB scale rather than
+                    // treating it as a percentage offset.
+                    volumePercent = volDbToPct(volPctToDb(volumePercent) + result.preamp)
+                        .coerceIn(0f, 100f)
                 }
                 val localBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i ->
                     if (i < result.bands.size) result.bands[i].copy()
