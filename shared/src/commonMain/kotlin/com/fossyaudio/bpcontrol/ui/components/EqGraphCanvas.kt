@@ -15,11 +15,20 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fossyaudio.bpcontrol.shared.eq.BiquadCoefficients
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import kotlin.math.log10
 import kotlin.math.pow
+
+/** Summed response of every contributing band at [freq], in dB. */
+private fun totalGainDbAt(freq: Double, coeffs: List<BiquadCoefficients>): Double {
+    var total = 0.0
+    for (c in coeffs) total += BiquadMath.magnitudeDb(freq, c)
+    return total
+}
 
 @Composable
 fun EqGraphCanvas(
@@ -42,12 +51,16 @@ fun EqGraphCanvas(
         val widthPx = with(density) { maxWidth.toPx() }
         val heightPx = with(density) { maxHeight.toPx() }
 
-        val safePadX = 60f
-        val safePadY = 40f
+        // dp, not raw pixels: as device pixels these insets were 30 dp at 2x and 20 dp at 3x,
+        // so the grid moved with the screen density.
+        val safePadX = with(density) { 20.dp.toPx() }
+        val safePadY = with(density) { 14.dp.toPx() }
         val graphW = (widthPx - safePadX * 2).coerceAtLeast(1f)
         val graphH = (heightPx - safePadY * 2).coerceAtLeast(1f)
         val midY = heightPx / 2f
-        val dBScale = graphH / 36f
+        // +/-14 dB window. Band gain clamps at +/-12, so the old /36f (+/-18 dB) wasted a third
+        // of the card on range that can never be drawn.
+        val dBScale = graphH / 28f
 
         fun xForFreq(f: Float): Float =
             safePadX + graphW * (log10(f / 20.0) / 3.0).toFloat()
@@ -59,21 +72,20 @@ fun EqGraphCanvas(
             freqGridLevels.map { freq -> freq to xForFreq(freq.toFloat()) }
         }
 
+        // Only the audible bands contribute; recomputed with the curve so both agree.
+        val activeBandCoeffs = remember(bands) {
+            bands.filter { it.enabled && kotlin.math.abs(it.gain) >= 0.1f }
+                .map { BiquadMath.coefficients(it) }
+        }
+
         // Cache expensive curve computation — only rebuild when bands or canvas size changes.
         val curvePath = remember(bands, widthPx, heightPx) {
             Path().apply {
                 if (widthPx <= 1f || heightPx <= 1f || bands.isEmpty()) return@apply
                 val sampleStepPx = 4
-                val activeBandCoeffs = bands
-                    .filter { it.enabled && kotlin.math.abs(it.gain) >= 0.1f }
-                    .map { it to BiquadMath.coefficients(it) }
                 for (px in 0..widthPx.toInt() step sampleStepPx) {
                     val freq = freqForX(px.toFloat()).coerceAtMost(22000.0)
-                    var totalGainDb = 0.0
-                    for ((_, coeffs) in activeBandCoeffs) {
-                        totalGainDb += BiquadMath.magnitudeDb(freq, coeffs)
-                    }
-                    val rawY = midY - (totalGainDb.toFloat() * dBScale)
+                    val rawY = midY - (totalGainDbAt(freq, activeBandCoeffs).toFloat() * dBScale)
                     val y = if (rawY.isNaN() || rawY.isInfinite()) midY else rawY
                     if (px == 0) moveTo(px.toFloat(), y) else lineTo(px.toFloat(), y)
                 }
