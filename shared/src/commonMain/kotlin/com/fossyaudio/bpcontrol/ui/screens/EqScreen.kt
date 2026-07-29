@@ -1,6 +1,10 @@
 package com.fossyaudio.bpcontrol.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,13 +14,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
@@ -32,7 +41,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
@@ -54,7 +65,10 @@ fun EqScreen(state: AppUiState, actions: AppActions) {
     val committedBands by state.eqBands.collectAsState()
     val bandsListState = rememberScrollState()
 
+    // View state only, so it lives here rather than in AppUiState. Saveable so both survive
+    // rotation.
     var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
+    var listExpanded by rememberSaveable { mutableStateOf(false) }
 
     // While a graph drag is live the screen renders from this local copy, so the curve tracks the
     // finger instead of waiting on the round trip through the controller.
@@ -102,16 +116,71 @@ fun EqScreen(state: AppUiState, actions: AppActions) {
             onBandGainDragEnd = onBandGainDragEnd,
         )
 
-        Spacer(Modifier.height(4.dp))
-        HorizontalDivider()
+        FilterListDisclosure(
+            expanded = listExpanded,
+            onToggle = { listExpanded = !listExpanded },
+            modifier = Modifier.padding(horizontal = Sp.l, vertical = Sp.s),
+        )
 
-        EqBandsList(
-            eqBands = eqBands,
-            state = bandsListState,
-            onBandUpdated = actions.onBandUpdated,
-            selectedIndex = selectedIndex,
-            onBandSelected = { selectedIndex = it },
-            modifier = Modifier.weight(1f),
+        AnimatedVisibility(
+            visible = listExpanded,
+            modifier = Modifier.weight(1f, fill = false),
+        ) {
+            Column {
+                HorizontalDivider()
+                EqBandsList(
+                    eqBands = eqBands,
+                    state = bandsListState,
+                    onBandUpdated = actions.onBandUpdated,
+                    selectedIndex = selectedIndex,
+                    onBandSelected = { selectedIndex = it },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Toggles the filter list.
+ *
+ * Collapsed by default, which is the point of the redesign — the graph and inspector cover
+ * everything most sessions need, and ten rows of four fields never fit at 360 dp anyway.
+ */
+@Composable
+private fun FilterListDisclosure(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val shape = RoundedCornerShape(18.dp)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(36.dp)
+            .clip(shape)
+            .then(
+                if (expanded) {
+                    Modifier.background(Color(0xFF4F378B))
+                } else {
+                    Modifier.border(1.dp, MaterialTheme.colorScheme.outline, shape)
+                }
+            )
+            .clickable(onClick = onToggle),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val contentColor =
+            if (expanded) Color(0xFFEADDFF) else MaterialTheme.colorScheme.primary
+        Text(
+            text = if (expanded) "Hide Filter List" else "Show Filter List",
+            style = MaterialTheme.typography.labelLarge,
+            color = contentColor,
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
+            contentDescription = null,
+            tint = contentColor,
+            modifier = Modifier.padding(start = Sp.xs),
         )
     }
 }
@@ -152,18 +221,30 @@ private fun EqTopSection(
     }
     val graphHeadroomDb = if (isBandsListScrolling) frozenHeadroomDb else headroomDb
 
-    Text(
-        text = "Parametric EQ",
-        style = MaterialTheme.typography.headlineMedium,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 24.dp),
-    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = Sp.l, end = Sp.l, top = Sp.l, bottom = Sp.m),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = "Parametric EQ",
+            style = MaterialTheme.typography.headlineMedium,
+        )
+        Text(
+            text = currentPresetName,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 
     // EQ Graph card (dark background)
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
-            .padding(16.dp, 0.dp, 16.dp, 8.dp),
+            .height(176.dp)
+            .padding(Sp.l, 0.dp, Sp.l, Sp.s),
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1C1E)),
     ) {
