@@ -45,9 +45,16 @@ import com.fossyaudio.bpcontrol.ui.components.doubleTapToReset
 import com.fossyaudio.bpcontrol.ui.theme.Sp
 import kotlin.math.roundToInt
 
-private val filterOptions = arrayOf("FAST-LL", "Fast-PC (BEST)", "Slow-LL", "SLOW-PC", "NOS")
-private val gainOptions = arrayOf("LOW", "HIGH")
-private val ampOptions = arrayOf("CLASS H", "CLASS AB")
+// Display strings only. The index is the wire value, so the order must not change.
+private val filterOptions = arrayOf(
+    "Fast roll-off, linear phase",
+    "Fast roll-off, phase compensated",
+    "Slow roll-off, linear phase",
+    "Slow roll-off, phase compensated",
+    "Non-oversampling (NOS)",
+)
+private val gainOptions = arrayOf("Low", "High")
+private val ampOptions = arrayOf("Class H", "Class AB")
 
 private const val MIC_GAIN_DB_LIMIT = 15f
 
@@ -187,7 +194,7 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
                         .padding(bottom = 12.dp),
                 )
                 SettingsDropdown(
-                    label = "Amp Topology",
+                    label = "Amp Class",
                     options = ampOptions,
                     selectedIndex = ampTopoIndex,
                     enabled = !isSyncing,
