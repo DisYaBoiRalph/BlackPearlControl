@@ -41,8 +41,10 @@ import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
 import com.fossyaudio.bpcontrol.ui.components.EqBandRow
+import com.fossyaudio.bpcontrol.ui.components.BandInspector
 import com.fossyaudio.bpcontrol.ui.components.DragWriteThrottle
 import com.fossyaudio.bpcontrol.ui.components.EqGraphCanvas
+import com.fossyaudio.bpcontrol.ui.theme.Sp
 
 /** One wire frame per this many ms while dragging, matching the volume path's throttle. */
 private const val DRAG_WRITE_INTERVAL_MS = 40L
@@ -172,6 +174,19 @@ private fun EqTopSection(
             onBandGainDrag = onBandGainDrag,
             onBandGainDragEnd = onBandGainDragEnd,
         )
+    }
+
+    eqBands.getOrNull(selectedIndex)?.let { selectedBand ->
+        Spacer(Modifier.height(Sp.s))
+        BandInspector(
+            band = selectedBand,
+            index = selectedIndex,
+            enabled = !isSyncing,
+            onUpdate = { actions.onBandUpdated(selectedIndex, it) },
+            onGainDrag = { onBandGainDrag(selectedIndex, it) },
+            onGainDragEnd = { onBandGainDragEnd(selectedIndex, it) },
+        )
+        Spacer(Modifier.height(Sp.s))
     }
 
     Column(modifier = Modifier.padding(horizontal = 16.dp)) {
