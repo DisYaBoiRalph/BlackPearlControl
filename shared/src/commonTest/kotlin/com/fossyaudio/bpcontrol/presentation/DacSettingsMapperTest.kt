@@ -1,5 +1,7 @@
 package com.fossyaudio.bpcontrol.presentation
 
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.test.Test
@@ -33,7 +35,7 @@ class DacSettingsMapperTest {
 
     @Test
     fun cb_profile_parses_hs_code_0x03_as_HS() {
-        val mapper = DacSettingsMapper(minRawVolume = -9472, maxRawVolume = 6440,
+        val mapper = DacSettingsMapper(minRawVolume = VOL_MIN_RAW, maxRawVolume = VOL_MAX_RAW,
             profile = BlackPearlProtocol.FirmwareProfile.CB)
         // HS in CB = 0x03; gain Q8.8 = 3*256 = 768 → 3.0 dB
         val data = buildPeqResponse(
@@ -49,7 +51,7 @@ class DacSettingsMapperTest {
 
     @Test
     fun cb_profile_parses_ls_code_0x01_as_LS() {
-        val mapper = DacSettingsMapper(minRawVolume = -9472, maxRawVolume = 6440,
+        val mapper = DacSettingsMapper(minRawVolume = VOL_MIN_RAW, maxRawVolume = VOL_MAX_RAW,
             profile = BlackPearlProtocol.FirmwareProfile.CB)
         val data = buildPeqResponse(
             freqLe = 100.toShort(),
@@ -64,7 +66,7 @@ class DacSettingsMapperTest {
 
     @Test
     fun cb_profile_parses_pk_code_0x02_as_PK() {
-        val mapper = DacSettingsMapper(minRawVolume = -9472, maxRawVolume = 6440,
+        val mapper = DacSettingsMapper(minRawVolume = VOL_MIN_RAW, maxRawVolume = VOL_MAX_RAW,
             profile = BlackPearlProtocol.FirmwareProfile.CB)
         val data = buildPeqResponse(
             freqLe = 1000.toShort(),
@@ -79,7 +81,7 @@ class DacSettingsMapperTest {
 
     @Test
     fun legacy_profile_parses_hs_code_0x04_as_HS() {
-        val mapper = DacSettingsMapper(minRawVolume = -9472, maxRawVolume = 6440,
+        val mapper = DacSettingsMapper(minRawVolume = VOL_MIN_RAW, maxRawVolume = VOL_MAX_RAW,
             profile = BlackPearlProtocol.FirmwareProfile.LEGACY)
         // HS in LEGACY = 0x04
         val data = buildPeqResponse(
@@ -95,7 +97,7 @@ class DacSettingsMapperTest {
 
     @Test
     fun mapper_profile_is_mutable() {
-        val mapper = DacSettingsMapper(minRawVolume = -9472, maxRawVolume = 6440)
+        val mapper = DacSettingsMapper(minRawVolume = VOL_MIN_RAW, maxRawVolume = VOL_MAX_RAW)
         assertEquals(BlackPearlProtocol.FirmwareProfile.CB, mapper.profile)
         mapper.profile = BlackPearlProtocol.FirmwareProfile.LEGACY
         assertEquals(BlackPearlProtocol.FirmwareProfile.LEGACY, mapper.profile)
@@ -104,7 +106,7 @@ class DacSettingsMapperTest {
     @Test
     fun cb_profile_code_0x04_falls_back_to_PK() {
         // 0x04 is LP in CB (internal) — not a named UI filter; should fall back to PK
-        val mapper = DacSettingsMapper(minRawVolume = -9472, maxRawVolume = 6440,
+        val mapper = DacSettingsMapper(minRawVolume = VOL_MIN_RAW, maxRawVolume = VOL_MAX_RAW,
             profile = BlackPearlProtocol.FirmwareProfile.CB)
         val data = buildPeqResponse(
             freqLe = 1000.toShort(),

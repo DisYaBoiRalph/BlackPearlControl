@@ -1,6 +1,8 @@
 package com.fossyaudio.bpcontrol.desktop
 
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
@@ -29,9 +31,6 @@ import kotlin.math.abs
  * instead of Android's UsbManager. Shared [AppUiState] is updated as readback results arrive.
  */
 class DesktopController(private val state: AppUiState) {
-
-    private val VOL_MIN_RAW = -9472
-    private val VOL_MAX_RAW = 6440
 
     private val WRITE = BlackPearlProtocol.Frame.WRITE
     private val READ = BlackPearlProtocol.Frame.READ

@@ -33,6 +33,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
@@ -76,7 +78,7 @@ private fun EqTopSection(
     val currentPresetIndex by state.currentPresetIndex.collectAsState()
     val isSyncing by state.isSyncing.collectAsState()
 
-    val headroomDb = state.calculateHeadroomDb(volumePercent, -9472, 6440)
+    val headroomDb = state.calculateHeadroomDb(volumePercent, VOL_MIN_RAW, VOL_MAX_RAW)
     val currentPresetName = presets.getOrNull(currentPresetIndex)?.name ?: "—"
 
     var presetMenuExpanded by remember { mutableStateOf(false) }

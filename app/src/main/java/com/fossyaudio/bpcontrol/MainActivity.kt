@@ -30,6 +30,8 @@ import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.presentation.DacSyncService
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
@@ -88,9 +90,6 @@ class MainActivity : AppCompatActivity() {
     private val CMD_PEQ_VALUES = BlackPearlProtocol.Command.PEQ_VALUES
     private val CMD_FLASH_EQ = BlackPearlProtocol.Command.FLASH_EQ
     private val CMD_READ_FW_VERSION = BlackPearlProtocol.Command.READ_FW_VERSION
-
-    private val VOL_MIN_RAW = -9472
-    private val VOL_MAX_RAW = 6440
 
     private val dacSettingsMapper by lazy { DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW) }
     private val dacSyncService by lazy {

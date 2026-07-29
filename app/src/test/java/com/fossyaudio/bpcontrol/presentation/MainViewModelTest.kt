@@ -1,5 +1,7 @@
 package com.fossyaudio.bpcontrol.presentation
 
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
+import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
@@ -10,15 +12,15 @@ import kotlin.test.assertEquals
 
 class MainViewModelTest {
 
-    private val minRawVolume = -9472
-    private val maxRawVolume = 6440
+    private val minRawVolume = VOL_MIN_RAW
+    private val maxRawVolume = VOL_MAX_RAW
 
     @Test
     fun calculate_headroom_matches_expected_for_50_percent() {
         val vm = MainViewModel()
 
         val actual = vm.uiState.calculateHeadroomDb(50f, minRawVolume, maxRawVolume)
-        val expected = 31.078125f // ((6440 - -1516) / 256)
+        val expected = 6.0f // ((1024 - -512) / 256)
 
         assertEquals(expected, actual)
     }
