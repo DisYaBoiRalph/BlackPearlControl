@@ -31,15 +31,32 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.fossyaudio.bpcontrol.shared.audio.BALANCE_DB_LIMIT
+import com.fossyaudio.bpcontrol.shared.audio.snapVolDb
+import com.fossyaudio.bpcontrol.shared.audio.volDbToPct
+import com.fossyaudio.bpcontrol.shared.audio.volPctToDb
 import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
+import com.fossyaudio.bpcontrol.ui.components.BipolarSlider
+import com.fossyaudio.bpcontrol.ui.components.doubleTapToReset
+import com.fossyaudio.bpcontrol.ui.theme.Sp
 import kotlin.math.roundToInt
 
 private val filterOptions = arrayOf("FAST-LL", "Fast-PC (BEST)", "Slow-LL", "SLOW-PC", "NOS")
 private val gainOptions = arrayOf("LOW", "HIGH")
 private val ampOptions = arrayOf("CLASS H", "CLASS AB")
+
+private const val MIC_GAIN_DB_LIMIT = 15f
+
+/** Negative favours the left channel — verified by ear against the device. */
+private fun balanceLabel(value: Float): String = when {
+    value == 0f -> "Centered"
+    value < 0f -> "L %.1f dB".format(-value)
+    else -> "R %.1f dB".format(value)
+}
 
 @Composable
 fun SettingsScreen(state: AppUiState, actions: AppActions) {
@@ -79,17 +96,24 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Output Control", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(16.dp))
-                Text("Master Volume", style = MaterialTheme.typography.bodyMedium)
+                val shownVol = if (volDragging) localVol else volumePercent
+                SliderReadout(
+                    label = "Master Volume",
+                    value = "%+.1f dB".format(volPctToDb(shownVol)),
+                )
                 Slider(
-                    value = if (volDragging) localVol else volumePercent,
+                    value = shownVol,
                     onValueChange = { v ->
                         if (!isSyncing) {
                             if (!volDragging) {
                                 volDragging = true
                                 actions.onVolumeStartDragging()
                             }
-                            localVol = v
-                            actions.onVolumeChange(v)
+                            // Snap on the dB scale, where the step is meaningful, rather than on
+                            // the percentage. Not via `steps`, which would draw 25 tick dots.
+                            val snapped = volDbToPct(snapVolDb(volPctToDb(v))).coerceIn(0f, 100f)
+                            localVol = snapped
+                            actions.onVolumeChange(snapped)
                         }
                     },
                     onValueChangeFinished = {
@@ -100,9 +124,12 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
                     enabled = !isSyncing,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                Spacer(Modifier.height(8.dp))
-                Text("Channel Balance", style = MaterialTheme.typography.bodyMedium)
-                Slider(
+                Spacer(Modifier.height(Sp.s))
+                SliderReadout(
+                    label = "Channel Balance",
+                    value = balanceLabel(balanceValue),
+                )
+                BipolarSlider(
                     value = balanceValue,
                     onValueChange = { raw ->
                         val snapped = raw.roundToInt()
@@ -112,15 +139,16 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
                     },
                     valueRange = -BALANCE_DB_LIMIT.toFloat()..BALANCE_DB_LIMIT.toFloat(),
                     enabled = !isSyncing,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .pointerInput(isSyncing) {
-                            detectTapGestures(
-                                onDoubleTap = {
-                                    if (!isSyncing) actions.onBalanceChange(0f)
-                                }
-                            )
-                        },
+                    modifier = Modifier.doubleTapToReset(enabled = !isSyncing) {
+                        actions.onBalanceChange(0f)
+                    },
+                )
+                Text(
+                    text = "Double-tap to center",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -178,12 +206,16 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text("Microphone Gain", style = MaterialTheme.typography.titleMedium)
-                Slider(
+                Spacer(Modifier.height(Sp.s))
+                SliderReadout(
+                    label = "Gain",
+                    value = "%+.1f dB".format(micGainDb),
+                )
+                BipolarSlider(
                     value = micGainDb,
                     onValueChange = { actions.onMicGainChange(it) },
-                    valueRange = -15f..15f,
+                    valueRange = -MIC_GAIN_DB_LIMIT..MIC_GAIN_DB_LIMIT,
                     enabled = !isSyncing,
-                    modifier = Modifier.fillMaxWidth(),
                 )
             }
         }
@@ -214,6 +246,27 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
             dismissButton = {
                 TextButton(onClick = { showFactoryResetDialog = false }) { Text("Cancel") }
             },
+        )
+    }
+}
+
+/** Label on the left, current value on the right, sitting directly above its slider. */
+@Composable
+private fun SliderReadout(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
         )
     }
 }

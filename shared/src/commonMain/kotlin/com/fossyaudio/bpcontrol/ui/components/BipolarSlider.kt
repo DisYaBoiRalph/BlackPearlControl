@@ -1,6 +1,8 @@
 package com.fossyaudio.bpcontrol.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -16,8 +18,42 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/**
+ * Resets the value on double tap.
+ *
+ * [androidx.compose.foundation.gestures.detectTapGestures] does not work for this: [Slider]
+ * consumes the pointer-down during the main pass, before an outer detector is offered it, so the
+ * callback never fires. This watches the initial pass instead and consumes only the second tap of
+ * a pair, leaving single taps and drags to the slider as usual.
+ */
+fun Modifier.doubleTapToReset(enabled: Boolean, onReset: () -> Unit): Modifier =
+    this.pointerInput(enabled, onReset) {
+        if (!enabled) return@pointerInput
+        var previousTapUptime = 0L
+        awaitEachGesture {
+            val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            val isSecondTap =
+                down.uptimeMillis - previousTapUptime <= viewConfiguration.doubleTapTimeoutMillis
+            previousTapUptime = down.uptimeMillis
+            if (!isSecondTap) return@awaitEachGesture
+
+            previousTapUptime = 0L
+            down.consume()
+            onReset()
+            // Swallow the rest of the gesture, or the slider seeks to the tap position and
+            // immediately overwrites the reset.
+            while (true) {
+                val event = awaitPointerEvent(PointerEventPass.Initial)
+                event.changes.forEach { it.consume() }
+                if (event.changes.none { it.pressed }) break
+            }
+        }
+    }
 
 /**
  * A slider for a value centred on zero.
