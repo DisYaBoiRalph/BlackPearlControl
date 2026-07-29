@@ -30,6 +30,7 @@ import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.presentation.DacSyncService
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
+import com.fossyaudio.bpcontrol.shared.audio.BALANCE_DB_LIMIT
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.audio.volDbToPct
@@ -603,7 +604,9 @@ class MainActivity : AppCompatActivity() {
                 delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
                 val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
                 val finalBal = if (abs(combined) <= 1) 0f else combined.toFloat()
-                mainViewModel.uiState.updateBalanceValue(finalBal.coerceIn(-15f, 15f))
+                mainViewModel.uiState.updateBalanceValue(
+                    finalBal.coerceIn(-BALANCE_DB_LIMIT.toFloat(), BALANCE_DB_LIMIT.toFloat())
+                )
 
                 // 7. Read PEQ Bands
                 activeSlot = END

@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
+import com.fossyaudio.bpcontrol.shared.audio.BALANCE_DB_LIMIT
 import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
 import kotlin.math.roundToInt
@@ -104,11 +105,12 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
                 Slider(
                     value = balanceValue,
                     onValueChange = { raw ->
-                        val snapped = raw.roundToInt().coerceIn(-15, 15).toFloat()
+                        val snapped = raw.roundToInt()
+                            .coerceIn(-BALANCE_DB_LIMIT, BALANCE_DB_LIMIT)
+                            .toFloat()
                         actions.onBalanceChange(snapped)
                     },
-                    valueRange = -15f..15f,
-                    steps = 29,
+                    valueRange = -BALANCE_DB_LIMIT.toFloat()..BALANCE_DB_LIMIT.toFloat(),
                     enabled = !isSyncing,
                     modifier = Modifier
                         .fillMaxWidth()

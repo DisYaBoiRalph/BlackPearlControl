@@ -1,6 +1,7 @@
 package com.fossyaudio.bpcontrol.desktop
 
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
+import com.fossyaudio.bpcontrol.shared.audio.BALANCE_DB_LIMIT
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
@@ -253,7 +254,10 @@ class DesktopController(private val state: AppUiState) {
             delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
             state.updateDacBalance(dacBalLeft, dacBalRight)
             val combined = if (abs(dacBalLeft) > abs(dacBalRight)) dacBalLeft else dacBalRight
-            state.updateBalanceValue((if (abs(combined) <= 1) 0f else combined.toFloat()).coerceIn(-15f, 15f))
+            state.updateBalanceValue(
+                (if (abs(combined) <= 1) 0f else combined.toFloat())
+                    .coerceIn(-BALANCE_DB_LIMIT.toFloat(), BALANCE_DB_LIMIT.toFloat())
+            )
 
             // PEQ bands
             activeSlot = END
