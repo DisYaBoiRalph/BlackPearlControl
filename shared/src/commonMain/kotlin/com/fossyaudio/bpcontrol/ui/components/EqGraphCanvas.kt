@@ -1,11 +1,14 @@
 package com.fossyaudio.bpcontrol.ui.components
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -22,6 +25,7 @@ import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import kotlin.math.log10
 import kotlin.math.pow
+import kotlin.math.roundToInt
 
 /** Summed response of every contributing band at [freq], in dB. */
 private fun totalGainDbAt(freq: Double, coeffs: List<BiquadCoefficients>): Double {
@@ -30,11 +34,18 @@ private fun totalGainDbAt(freq: Double, coeffs: List<BiquadCoefficients>): Doubl
     return total
 }
 
+/** Vertical drag beyond this leaves the drawable range; band gain clamps here too. */
+private const val MAX_BAND_GAIN_DB = 12f
+
 @Composable
 fun EqGraphCanvas(
     bands: List<FilterBand>,
     preampDb: Float,
     modifier: Modifier = Modifier,
+    selectedIndex: Int = -1,
+    onBandSelected: (Int) -> Unit = {},
+    onBandGainDrag: (Int, Float) -> Unit = { _, _ -> },
+    onBandGainDragEnd: (Int, Float) -> Unit = { _, _ -> },
 ) {
     val textMeasurer = rememberTextMeasurer()
     val dbGridLevels = remember { listOf(12, 6, 0, -6, -12) }
@@ -43,6 +54,9 @@ fun EqGraphCanvas(
     val curveColor = Color(0xFF00BFFF)
     val ceilingColor = Color(0xFFFFA500)
     val gridColor = Color.White.copy(alpha = 0.12f)
+    val selectedColor = Color(0xFFD0BCFF)
+    val disabledHandleColor = Color(0xFF3A3742)
+    val handleStrokeColor = Color(0xFF1A1C1E)
     val labelStyle = TextStyle(color = Color(0xFFBBBBBB), fontSize = 9.sp)
     val ceilingDash = remember { PathEffect.dashPathEffect(floatArrayOf(10f, 10f), 0f) }
 
@@ -92,7 +106,67 @@ fun EqGraphCanvas(
             }
         }
 
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        // Nearest band by horizontal distance, or -1 if the touch is nowhere near one. 44 dp is
+        // the touch-target floor; without the guard a tap on empty canvas yanks a distant band.
+        val hitSlopPx = with(density) { 44.dp.toPx() }
+        fun bandNearest(x: Float): Int {
+            if (bands.isEmpty()) return -1
+            var best = -1
+            var bestDistance = Float.MAX_VALUE
+            bands.forEachIndexed { index, band ->
+                val distance = kotlin.math.abs(xForFreq(band.freq.toFloat()) - x)
+                if (distance < bestDistance) {
+                    bestDistance = distance
+                    best = index
+                }
+            }
+            return if (bestDistance <= hitSlopPx) best else -1
+        }
+
+        fun gainForY(y: Float): Float =
+            ((midY - y) / dBScale).coerceIn(-MAX_BAND_GAIN_DB, MAX_BAND_GAIN_DB)
+
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                // Tap and drag need separate blocks: detectDragGestures never fires for a tap.
+                .pointerInput(bands) {
+                    detectTapGestures { offset ->
+                        val index = bandNearest(offset.x)
+                        if (index >= 0) onBandSelected(index)
+                    }
+                }
+                .pointerInput(bands) {
+                    var dragIndex = -1
+                    var dragGain = 0f
+                    detectDragGestures(
+                        onDragStart = { offset ->
+                            dragIndex = bandNearest(offset.x)
+                            if (dragIndex >= 0) {
+                                onBandSelected(dragIndex)
+                                dragGain = bands[dragIndex].gain
+                            }
+                        },
+                        onDrag = { change, _ ->
+                            if (dragIndex >= 0) {
+                                change.consume()
+                                // Gain only. Frequency is not draggable: log-x drag is imprecise
+                                // on a phone, and Freq belongs in the inspector and the list.
+                                dragGain = (gainForY(change.position.y) * 10f).roundToInt() / 10f
+                                onBandGainDrag(dragIndex, dragGain)
+                            }
+                        },
+                        onDragEnd = {
+                            if (dragIndex >= 0) onBandGainDragEnd(dragIndex, dragGain)
+                            dragIndex = -1
+                        },
+                        onDragCancel = {
+                            if (dragIndex >= 0) onBandGainDragEnd(dragIndex, dragGain)
+                            dragIndex = -1
+                        },
+                    )
+                },
+        ) {
             val w = size.width
             val h = size.height
             if (w <= 1f || h <= 1f) return@Canvas
@@ -160,6 +234,31 @@ fun EqGraphCanvas(
                     path = curvePath,
                     color = curveColor,
                     style = Stroke(width = 5f),
+                )
+            }
+
+            // Band handles, sitting on the composite curve rather than at each band's own gain,
+            // so they stay on the line.
+            bands.forEachIndexed { index, band ->
+                val x = xForFreq(band.freq.toFloat())
+                val rawY = midY -
+                    (totalGainDbAt(band.freq.toDouble(), activeBandCoeffs).toFloat() * dBScale)
+                if (rawY.isNaN() || rawY.isInfinite()) return@forEachIndexed
+                val y = rawY.coerceIn(0f, h)
+
+                val isSelected = index == selectedIndex
+                val radius = if (isSelected) 7.dp.toPx() else 4.5f.dp.toPx()
+                val fill = when {
+                    isSelected -> selectedColor
+                    band.enabled -> curveColor
+                    else -> disabledHandleColor
+                }
+                drawCircle(color = fill, radius = radius, center = Offset(x, y))
+                drawCircle(
+                    color = handleStrokeColor,
+                    radius = radius,
+                    center = Offset(x, y),
+                    style = Stroke(width = 1.5f.dp.toPx()),
                 )
             }
         }

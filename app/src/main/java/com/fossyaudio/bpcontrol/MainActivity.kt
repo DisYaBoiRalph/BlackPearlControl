@@ -299,6 +299,9 @@ class MainActivity : AppCompatActivity() {
                             }
                             mainViewModel.uiState.updateEqBand(index, band)
                         },
+                        onBandDragUpdate = { index, band ->
+                            sendFilterUpdate(index, band, autoLatch = false)
+                        },
                         onPresetLoaded = { index ->
                             currentPresetIndex = index
                             val selected = presets[index]

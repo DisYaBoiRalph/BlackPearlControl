@@ -43,6 +43,7 @@ fun main() = application {
             onMicGainChange = { controller.onMicGainChange(it) },
             onFactoryReset = { controller.onFactoryReset() },
             onBandUpdated = { index, band -> controller.onBandUpdated(index, band, presetStorage) },
+            onBandDragUpdate = { index, band -> controller.onBandDragUpdate(index, band) },
             onPresetLoaded = { controller.onPresetLoaded(it) },
             onPresetSaved = { name -> controller.onPresetSaved(name, presetStorage) },
             onPresetDeleted = { name -> controller.onPresetDeleted(name, presetStorage) },

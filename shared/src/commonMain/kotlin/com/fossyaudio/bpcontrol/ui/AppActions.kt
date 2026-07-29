@@ -19,7 +19,13 @@ data class AppActions(
     val onAmpTopoSelected: (Int) -> Unit,
     val onMicGainChange: (Float) -> Unit,
     val onFactoryReset: () -> Unit,
+    /** Commits a band: writes it, latches, saves to flash and persists the preset. */
     val onBandUpdated: (Int, FilterBand) -> Unit,
+    /**
+     * Writes a band mid-drag. Wire only — no latch, no flash, no preset write, because a drag
+     * fires this many times a second. [onBandUpdated] commits the final value on release.
+     */
+    val onBandDragUpdate: (Int, FilterBand) -> Unit,
     val onPresetLoaded: (Int) -> Unit,
     val onPresetSaved: (String) -> Unit,
     val onPresetDeleted: (String) -> Unit,

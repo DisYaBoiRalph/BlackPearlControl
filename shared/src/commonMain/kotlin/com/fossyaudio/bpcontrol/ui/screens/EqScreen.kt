@@ -27,8 +27,10 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,12 +41,52 @@ import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
 import com.fossyaudio.bpcontrol.ui.components.EqBandRow
+import com.fossyaudio.bpcontrol.ui.components.DragWriteThrottle
 import com.fossyaudio.bpcontrol.ui.components.EqGraphCanvas
+
+/** One wire frame per this many ms while dragging, matching the volume path's throttle. */
+private const val DRAG_WRITE_INTERVAL_MS = 40L
 
 @Composable
 fun EqScreen(state: AppUiState, actions: AppActions) {
-    val eqBands by state.eqBands.collectAsState()
+    val committedBands by state.eqBands.collectAsState()
     val bandsListState = rememberScrollState()
+
+    var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
+
+    // While a graph drag is live the screen renders from this local copy, so the curve tracks the
+    // finger instead of waiting on the round trip through the controller.
+    var dragIndex by remember { mutableIntStateOf(-1) }
+    var dragBand by remember { mutableStateOf<FilterBand?>(null) }
+    val dragThrottle = remember { DragWriteThrottle(DRAG_WRITE_INTERVAL_MS) }
+
+    val eqBands = remember(committedBands, dragIndex, dragBand) {
+        val inFlight = dragBand
+        if (dragIndex in committedBands.indices && inFlight != null) {
+            committedBands.toMutableList().also { it[dragIndex] = inFlight }
+        } else {
+            committedBands
+        }
+    }
+
+    val onBandGainDrag: (Int, Float) -> Unit = { index, gain ->
+        val updated = committedBands.getOrNull(index)?.copy(gain = gain)
+        if (updated != null) {
+            dragIndex = index
+            dragBand = updated
+            // onBandUpdated writes a frame, latches, schedules a flash save and rewrites the
+            // preset to disk. At 60 events a second that floods the queue, so mid-drag writes
+            // go through the wire-only path and are throttled on top of that.
+            if (dragThrottle.shouldWrite()) actions.onBandDragUpdate(index, updated)
+        }
+    }
+
+    val onBandGainDragEnd: (Int, Float) -> Unit = { index, gain ->
+        committedBands.getOrNull(index)?.let { actions.onBandUpdated(index, it.copy(gain = gain)) }
+        dragIndex = -1
+        dragBand = null
+        dragThrottle.reset()
+    }
 
     Column(modifier = Modifier.fillMaxSize()) {
         EqTopSection(
@@ -52,6 +94,10 @@ fun EqScreen(state: AppUiState, actions: AppActions) {
             actions = actions,
             eqBands = eqBands,
             isBandsListScrolling = bandsListState.isScrollInProgress,
+            selectedIndex = selectedIndex,
+            onBandSelected = { selectedIndex = it },
+            onBandGainDrag = onBandGainDrag,
+            onBandGainDragEnd = onBandGainDragEnd,
         )
 
         Spacer(Modifier.height(4.dp))
@@ -72,6 +118,10 @@ private fun EqTopSection(
     actions: AppActions,
     eqBands: List<FilterBand>,
     isBandsListScrolling: Boolean,
+    selectedIndex: Int,
+    onBandSelected: (Int) -> Unit,
+    onBandGainDrag: (Int, Float) -> Unit,
+    onBandGainDragEnd: (Int, Float) -> Unit,
 ) {
     val volumePercent by state.volumePercent.collectAsState()
     val presets by state.presets.collectAsState()
@@ -117,6 +167,10 @@ private fun EqTopSection(
             bands = eqBands,
             preampDb = graphHeadroomDb,
             modifier = Modifier.fillMaxSize(),
+            selectedIndex = selectedIndex,
+            onBandSelected = onBandSelected,
+            onBandGainDrag = onBandGainDrag,
+            onBandGainDragEnd = onBandGainDragEnd,
         )
     }
 

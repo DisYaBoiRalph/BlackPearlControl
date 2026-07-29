@@ -430,6 +430,11 @@ class DesktopController(private val state: AppUiState) {
         state.updateEqBand(index, band)
     }
 
+    /** Mid-drag write: no latch, no flash, no preset persistence. See AppActions. */
+    fun onBandDragUpdate(index: Int, band: FilterBand) {
+        sendFilterUpdate(index, band, autoLatch = false)
+    }
+
     fun onPresetLoaded(index: Int) {
         val presets = state.presets.value
         state.updateCurrentPresetIndex(index)
