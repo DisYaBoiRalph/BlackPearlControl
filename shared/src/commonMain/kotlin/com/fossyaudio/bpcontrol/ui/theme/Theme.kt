@@ -22,6 +22,12 @@ private val LightColors = lightColorScheme(
 private val DarkColors = darkColorScheme(
     primary = Color(0xFFD0BCFF),
     onPrimary = Color(0xFF381E72),
+    // Material baseline values, pinned so a Compose bump cannot move the surfaces underneath us.
+    // The light scheme already pins its own; this stops the two halves from drifting apart.
+    surface = Color(0xFF141218),
+    surfaceVariant = Color(0xFF49454F),
+    surfaceContainerLow = Color(0xFF1D1B20),
+    surfaceContainer = Color(0xFF211F26),
 )
 
 @Composable
