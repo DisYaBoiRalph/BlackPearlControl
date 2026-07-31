@@ -28,7 +28,6 @@ class PresetRepository(
                 for (i in 0 until array.length()) {
                     val pObj = array.getJSONObject(i)
                     val name = pObj.getString("name")
-                    val preamp = pObj.optDouble("preamp", 0.0).toFloat()
                     val bArray = pObj.getJSONArray("filters")
                     val bList = mutableListOf<FilterBand>()
                     for (b in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
@@ -49,7 +48,7 @@ class PresetRepository(
                             bList.add(FilterBand(freq = defaultFreqs[b]))
                         }
                     }
-                    loaded.add(Preset(name, preamp, bList))
+                    loaded.add(Preset(name, bList))
                 }
             } catch (e: org.json.JSONException) {
                 Log.e("Presets", "JSON Parse Error", e)
@@ -66,7 +65,6 @@ class PresetRepository(
         for (p in presets) {
             val pObj = JSONObject()
             pObj.put("name", p.name)
-            pObj.put("preamp", p.preamp.toDouble())
             val bArray = JSONArray()
             for (b in p.bands) {
                 val bObj = JSONObject()
@@ -86,12 +84,12 @@ class PresetRepository(
     private fun ensureSystemPresets(presets: MutableList<Preset>) {
         if (presets.none { it.name == "Flat" }) {
             val flatBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
-            presets.add(0, Preset("Flat", 0f, flatBands))
+            presets.add(0, Preset("Flat", flatBands))
         }
 
         if (presets.none { it.name == "None" }) {
             val noneBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
-            presets.add(Preset("None", 0f, noneBands))
+            presets.add(Preset("None", noneBands))
         }
     }
 }

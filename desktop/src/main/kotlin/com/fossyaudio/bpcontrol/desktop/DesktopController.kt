@@ -455,7 +455,7 @@ class DesktopController(private val state: AppUiState) {
 
     fun onPresetSaved(name: String, presetStorage: DesktopPresetStorage) {
         val newPresets = state.presets.value.toMutableList()
-        newPresets.add(Preset(name, state.volumePercent.value, state.eqBands.value.map { it.copy() }))
+        newPresets.add(Preset(name, state.eqBands.value.map { it.copy() }))
         state.updatePresets(newPresets)
         state.updateCurrentPresetIndex(newPresets.size - 1)
         presetStorage.save(newPresets)

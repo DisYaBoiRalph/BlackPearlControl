@@ -29,7 +29,6 @@ class DesktopPresetStorage(
                 for (i in 0 until array.length()) {
                     val pObj = array.getJSONObject(i)
                     val name = pObj.getString("name")
-                    val preamp = pObj.optDouble("preamp", 0.0).toFloat()
                     val bArray = pObj.optJSONArray("filters") ?: JSONArray()
                     val bList = mutableListOf<FilterBand>()
                     for (b in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
@@ -49,7 +48,7 @@ class DesktopPresetStorage(
                             bList.add(FilterBand(freq = defaultFreqs[b]))
                         }
                     }
-                    loaded.add(Preset(name = name, preamp = preamp, bands = bList))
+                    loaded.add(Preset(name = name, bands = bList))
                 }
             }
         }
@@ -63,7 +62,6 @@ class DesktopPresetStorage(
         for (preset in presets) {
             val pObj = JSONObject()
             pObj.put("name", preset.name)
-            pObj.put("preamp", preset.preamp.toDouble())
             val bands = JSONArray()
             for (band in preset.bands) {
                 val bObj = JSONObject()
@@ -89,7 +87,6 @@ class DesktopPresetStorage(
                 0,
                 Preset(
                     name = "Flat",
-                    preamp = 0f,
                     bands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
                 )
             )
@@ -99,7 +96,6 @@ class DesktopPresetStorage(
             presets.add(
                 Preset(
                     name = "None",
-                    preamp = 0f,
                     bands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
                 )
             )

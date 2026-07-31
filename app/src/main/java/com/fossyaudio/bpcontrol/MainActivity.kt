@@ -322,7 +322,7 @@ class MainActivity : AppCompatActivity() {
                         onPresetSaved = { name ->
                             val clonedBands = mainViewModel.uiState.eqBands.value.map { it.copy() }
                             val newPresets = presets.toMutableList()
-                            newPresets.add(Preset(name, volumePercent, clonedBands))
+                            newPresets.add(Preset(name, clonedBands))
                             mainViewModel.uiState.updatePresets(newPresets)
                             currentPresetIndex = newPresets.size - 1
                             savePresetsToPrefs()
@@ -638,7 +638,7 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                     val nonePreset = presets[noneIdx]
-                    val updatedNone = nonePreset.copy(preamp = volumePercent, bands = localBands.toList())
+                    val updatedNone = nonePreset.copy(bands = localBands.toList())
                     presets = presets.toMutableList().also { it[noneIdx] = updatedNone }
                     currentPresetIndex = noneIdx
                 }
@@ -713,7 +713,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                 val nonePreset = presets[noneIdx]
-                val updatedNone = nonePreset.copy(preamp = volumePercent, bands = localBands)
+                val updatedNone = nonePreset.copy(bands = localBands)
                 presets = presets.toMutableList().also { it[noneIdx] = updatedNone }
                 currentPresetIndex = noneIdx
                 mainViewModel.uiState.updateEqBands(localBands)
