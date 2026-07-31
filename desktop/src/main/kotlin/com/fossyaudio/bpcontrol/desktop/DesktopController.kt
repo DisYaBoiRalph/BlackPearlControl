@@ -7,8 +7,10 @@ import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.model.PresetSource
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
+import com.fossyaudio.bpcontrol.shared.preset.uniqueName
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import com.fossyaudio.bpcontrol.ui.AppUiState
@@ -471,6 +473,39 @@ class DesktopController(private val state: AppUiState) {
         else if (current > originalIndex) current--
         state.updatePresets(newPresets)
         state.updateCurrentPresetIndex(current)
+        presetStorage.save(newPresets)
+    }
+
+    fun onPresetRenamed(index: Int, newName: String, presetStorage: DesktopPresetStorage) {
+        val presets = state.presets.value
+        if (index !in presets.indices) return
+        val newPresets = presets.toMutableList()
+        newPresets[index] = newPresets[index].copy(name = newName)
+        state.updatePresets(newPresets)
+        presetStorage.save(newPresets)
+    }
+
+    fun onPresetDuplicated(index: Int, presetStorage: DesktopPresetStorage) {
+        val presets = state.presets.value
+        val source = presets.getOrNull(index) ?: return
+        // Duplicating "None" is how a live hardware read gets saved as a real preset, so it
+        // copies the live eqBands, not None's own bands.
+        val bands = if (source.name == "None") {
+            state.eqBands.value.map { it.copy() }
+        } else {
+            source.bands.map { it.copy() }
+        }
+        val name = uniqueName(source.name, presets)
+        val newPresets = presets.toMutableList()
+        newPresets.add(
+            Preset(
+                name = name,
+                bands = bands,
+                source = PresetSource.MANUAL,
+                savedAt = System.currentTimeMillis(),
+            )
+        )
+        state.updatePresets(newPresets)
         presetStorage.save(newPresets)
     }
 }

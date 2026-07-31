@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -23,6 +24,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
@@ -51,6 +53,10 @@ fun PresetsScreen(state: AppUiState, actions: AppActions) {
 
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
+
+    var renameIndex by remember { mutableStateOf(-1) }
+    var renameText by remember { mutableStateOf("") }
+    var deleteIndex by remember { mutableStateOf(-1) }
 
     // Which row is "active" tracks the hardware, not the tap order — a hardware read or a hand
     // edit on PEQ can move it out from under whatever was tapped last.
@@ -140,9 +146,74 @@ fun PresetsScreen(state: AppUiState, actions: AppActions) {
                         active = if (activeIndex == -1) preset.name == "None" else index == activeIndex,
                         enabled = !isSyncing,
                         onLoad = { actions.onPresetLoaded(index) },
+                        onRename = { renameIndex = index; renameText = preset.name },
+                        onDuplicate = { actions.onPresetDuplicated(index) },
+                        onDelete = { deleteIndex = index },
                     )
                 }
             }
+        }
+    }
+
+    if (renameIndex >= 0) {
+        val target = presets.getOrNull(renameIndex)
+        if (target == null) {
+            renameIndex = -1
+        } else {
+            val collides = presets.withIndex().any { (i, p) -> i != renameIndex && p.name == renameText }
+            AlertDialog(
+                onDismissRequest = { renameIndex = -1 },
+                title = { Text("Rename preset") },
+                text = {
+                    OutlinedTextField(
+                        value = renameText,
+                        onValueChange = { renameText = it },
+                        singleLine = true,
+                        isError = renameText.isBlank() || collides,
+                        label = { Text("Name") },
+                        supportingText = {
+                            when {
+                                renameText.isBlank() -> Text("Name cannot be blank")
+                                collides -> Text("A preset with this name already exists")
+                            }
+                        },
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = renameText.isNotBlank() && !collides,
+                        onClick = {
+                            actions.onPresetRenamed(renameIndex, renameText)
+                            renameIndex = -1
+                        },
+                    ) { Text("Save") }
+                },
+                dismissButton = {
+                    TextButton(onClick = { renameIndex = -1 }) { Text("Cancel") }
+                },
+            )
+        }
+    }
+
+    if (deleteIndex >= 0) {
+        val target = presets.getOrNull(deleteIndex)
+        if (target == null) {
+            deleteIndex = -1
+        } else {
+            AlertDialog(
+                onDismissRequest = { deleteIndex = -1 },
+                title = { Text("Delete \"${target.name}\"?") },
+                text = { Text("This cannot be undone.") },
+                confirmButton = {
+                    TextButton(onClick = {
+                        actions.onPresetDeleted(target.name)
+                        deleteIndex = -1
+                    }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { deleteIndex = -1 }) { Text("Cancel") }
+                },
+            )
         }
     }
 }

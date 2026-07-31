@@ -39,8 +39,10 @@ import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.model.PresetSource
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
+import com.fossyaudio.bpcontrol.shared.preset.uniqueName
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import com.fossyaudio.bpcontrol.transport.usb.UsbCommandQueueProcessor
@@ -338,6 +340,38 @@ class MainActivity : AppCompatActivity() {
                                 mainViewModel.uiState.updatePresets(newPresets)
                                 savePresetsToPrefs()
                                 Toast.makeText(this@MainActivity, "Preset Deleted", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onPresetRenamed = { index, newName ->
+                            if (index in presets.indices) {
+                                val newPresets = presets.toMutableList()
+                                newPresets[index] = newPresets[index].copy(name = newName)
+                                mainViewModel.uiState.updatePresets(newPresets)
+                                savePresetsToPrefs()
+                            }
+                        },
+                        onPresetDuplicated = { index ->
+                            if (index in presets.indices) {
+                                val source = presets[index]
+                                // Duplicating "None" is how a live hardware read gets saved as a
+                                // real preset, so it copies the live eqBands, not None's own bands.
+                                val bands = if (source.name == "None") {
+                                    mainViewModel.uiState.eqBands.value.map { it.copy() }
+                                } else {
+                                    source.bands.map { it.copy() }
+                                }
+                                val name = uniqueName(source.name, presets)
+                                val newPresets = presets.toMutableList()
+                                newPresets.add(
+                                    Preset(
+                                        name = name,
+                                        bands = bands,
+                                        source = PresetSource.MANUAL,
+                                        savedAt = System.currentTimeMillis(),
+                                    )
+                                )
+                                mainViewModel.uiState.updatePresets(newPresets)
+                                savePresetsToPrefs()
                             }
                         },
                         onImport = { importLauncher.launch("*/*") },

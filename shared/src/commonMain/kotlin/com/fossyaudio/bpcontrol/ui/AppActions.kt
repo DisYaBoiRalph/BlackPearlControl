@@ -29,6 +29,8 @@ data class AppActions(
     val onPresetLoaded: (Int) -> Unit,
     val onPresetSaved: (String) -> Unit,
     val onPresetDeleted: (String) -> Unit,
+    val onPresetRenamed: (Int, String) -> Unit,
+    val onPresetDuplicated: (Int) -> Unit,
     val onImport: () -> Unit,
     val onExport: () -> Unit,
 )

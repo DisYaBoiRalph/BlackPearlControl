@@ -16,10 +16,18 @@ import androidx.compose.material.icons.filled.Cable
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HorizontalRule
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -39,15 +47,26 @@ private val activeRowColor = Color(0xFF221E2B)
 private val activeTileColor = Color(0xFF2A2338)
 private val defaultSparkStroke = Color(0xFF00BFFF)
 
-/** One row of the preset library: source tile, name, metadata, sparkline. Tap to load. */
+/**
+ * One row of the preset library: source tile, name, metadata, sparkline and an overflow menu.
+ * Tap anywhere on the row to load; the menu itself never loads (that's the row's job) — it
+ * offers Rename, Duplicate and Delete, hiding Rename/Delete for "Flat" and "None", which are not
+ * user presets.
+ */
 @Composable
 fun PresetRow(
     preset: Preset,
     active: Boolean,
     onLoad: () -> Unit,
+    onRename: () -> Unit,
+    onDuplicate: () -> Unit,
+    onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    val isSystemPreset = preset.name == "None" || preset.source == PresetSource.BUILT_IN
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -85,6 +104,45 @@ fun PresetRow(
                 stroke = if (active) MaterialTheme.colorScheme.primary else defaultSparkStroke,
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+
+        Box {
+            IconButton(
+                onClick = { menuExpanded = true },
+                enabled = enabled,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.MoreVert,
+                    contentDescription = "More options",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
+                if (preset.name != "None") {
+                    DropdownMenuItem(
+                        text = { Text("Load") },
+                        onClick = { menuExpanded = false; onLoad() },
+                    )
+                }
+                if (!isSystemPreset) {
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        onClick = { menuExpanded = false; onRename() },
+                    )
+                }
+                DropdownMenuItem(
+                    text = { Text("Duplicate") },
+                    onClick = { menuExpanded = false; onDuplicate() },
+                )
+                if (!isSystemPreset) {
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        onClick = { menuExpanded = false; onDelete() },
+                    )
+                }
+            }
         }
     }
 }

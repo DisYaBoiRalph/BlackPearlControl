@@ -47,6 +47,8 @@ fun main() = application {
             onPresetLoaded = { controller.onPresetLoaded(it) },
             onPresetSaved = { name -> controller.onPresetSaved(name, presetStorage) },
             onPresetDeleted = { name -> controller.onPresetDeleted(name, presetStorage) },
+            onPresetRenamed = { index, newName -> controller.onPresetRenamed(index, newName, presetStorage) },
+            onPresetDuplicated = { index -> controller.onPresetDuplicated(index, presetStorage) },
             onImport = { /* TODO: desktop file picker for AutoEQ import */ },
             onExport = { /* TODO: desktop file picker for preset export */ },
         )
