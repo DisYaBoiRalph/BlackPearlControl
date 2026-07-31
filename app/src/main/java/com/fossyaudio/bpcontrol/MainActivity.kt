@@ -2,6 +2,8 @@ package com.fossyaudio.bpcontrol
 
 import android.annotation.SuppressLint
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -35,6 +37,7 @@ import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.audio.volDbToPct
 import com.fossyaudio.bpcontrol.shared.audio.volPctToDb
+import com.fossyaudio.bpcontrol.shared.diagnostics.ProtocolLog
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
@@ -98,6 +101,7 @@ class MainActivity : AppCompatActivity() {
     private val CMD_FLASH_EQ = BlackPearlProtocol.Command.FLASH_EQ
     private val CMD_READ_FW_VERSION = BlackPearlProtocol.Command.READ_FW_VERSION
 
+    private val protocolLog = ProtocolLog()
     private val dacSettingsMapper by lazy { DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW) }
     private val dacSyncService by lazy {
         DacSyncService(
@@ -107,6 +111,7 @@ class MainActivity : AppCompatActivity() {
             connectionProvider = { usbConnection },
             interfaceIdProvider = { usbInterface?.id ?: 0 },
             endpointProvider = { endpointIn },
+            protocolLog = protocolLog,
         )
     }
 
@@ -177,6 +182,7 @@ class MainActivity : AppCompatActivity() {
             cmdPeqValues = CMD_PEQ_VALUES,
             cmdGlobalGain = CMD_GLOBAL_GAIN,
             usbMutex = usbMutex,
+            protocolLog = protocolLog,
         )
     }
 
@@ -377,6 +383,10 @@ class MainActivity : AppCompatActivity() {
                         },
                         onImport = { importLauncher.launch("*/*") },
                         onExport = { exportLauncher.launch("BP_Preset.txt") },
+                        onCopyLog = {
+                            val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("Protocol log", protocolLog.snapshot()))
+                        },
                     ),
                 )
             }
@@ -795,6 +805,7 @@ class MainActivity : AppCompatActivity() {
         usbConnectionManager.closeConnection(lifecycleScope)
         pollingJob?.cancel()
         resetUiToDefaults()
+        protocolLog.clear()
     }
 
     override fun onDestroy() {

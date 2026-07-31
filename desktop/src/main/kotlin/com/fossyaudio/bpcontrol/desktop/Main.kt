@@ -12,6 +12,8 @@ import com.fossyaudio.bpcontrol.ui.AppUiState
 import com.fossyaudio.bpcontrol.ui.MainScreen
 import com.fossyaudio.bpcontrol.ui.theme.BpControlTheme
 import java.awt.FileDialog
+import java.awt.Toolkit
+import java.awt.datatransfer.StringSelection
 import java.io.File
 
 fun main() = application {
@@ -62,6 +64,10 @@ fun main() = application {
                 }
             },
             onExport = { /* TODO: desktop file picker for preset export */ },
+            onCopyLog = {
+                val selection = StringSelection(controller.protocolLog.snapshot())
+                Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, selection)
+            },
         )
 
         BpControlTheme {

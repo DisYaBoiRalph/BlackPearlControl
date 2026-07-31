@@ -6,6 +6,7 @@ import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.audio.volDbToPct
 import com.fossyaudio.bpcontrol.shared.audio.volPctToDb
+import com.fossyaudio.bpcontrol.shared.diagnostics.ProtocolLog
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
@@ -58,6 +59,7 @@ class DesktopController(private val state: AppUiState) {
     private val mapper = DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW)
     private val sendQueue = LinkedBlockingQueue<ByteArray>(BlackPearlProtocol.Timing.QUEUE_CAPACITY)
     private val running = AtomicBoolean(false)
+    val protocolLog = ProtocolLog()
 
     private var hidServices: HidServices? = null
     private var device: HidDevice? = null
@@ -93,6 +95,7 @@ class DesktopController(private val state: AppUiState) {
         device = null
         hidServices?.shutdown()
         state.updateIsConnected(false)
+        protocolLog.clear()
     }
 
     // ─── Connection loop ─────────────────────────────────────────────────────
@@ -131,7 +134,10 @@ class DesktopController(private val state: AppUiState) {
     // ─── Send queue ──────────────────────────────────────────────────────────
 
     fun enqueue(payload: ByteArray) {
-        if (running.get()) sendQueue.offer(payload.copyOf())
+        if (running.get()) {
+            protocolLog.record("OUT", payload)
+            sendQueue.offer(payload.copyOf())
+        }
     }
 
     private fun startSendQueue() {
@@ -171,6 +177,7 @@ class DesktopController(private val state: AppUiState) {
         // so we strip [0] and let hid4java add it — otherwise device gets a double report ID.
         val request = BlackPearlCodec.encodeReadRequest(cmd, p1, p2, p3)
         val payload = request.copyOfRange(1, request.size)
+        protocolLog.record("OUT", payload)
         val written = dev.write(payload, payload.size, BlackPearlProtocol.Device.REPORT_ID)
         if (written < 0) {
             println("[BPControl/HID] write failed cmd=0x${cmd.toInt().and(0xFF).toString(16)} err=${dev.lastErrorMessage}")
@@ -181,6 +188,7 @@ class DesktopController(private val state: AppUiState) {
         val read = dev.read(response, BlackPearlProtocol.Timing.READ_TRANSFER_TIMEOUT_MS)
         println("[BPControl/HID] cmd=0x${cmd.toInt().and(0xFF).toString(16)} p1=0x${p1.toInt().and(0xFF).toString(16)} written=$written read=$read" +
             if (read > 0) " resp=[${response.take(8).joinToString { "0x${it.toInt().and(0xFF).toString(16)}" }}...]" else " (null response)")
+        if (read > 0) protocolLog.record("IN", response)
         return if (read > 0) response else null
     }
 

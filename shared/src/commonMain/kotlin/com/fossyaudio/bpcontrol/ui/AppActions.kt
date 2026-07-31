@@ -33,4 +33,5 @@ data class AppActions(
     val onPresetDuplicated: (Int) -> Unit,
     val onImport: () -> Unit,
     val onExport: () -> Unit,
+    val onCopyLog: () -> Unit,
 )

@@ -3,6 +3,7 @@ package com.fossyaudio.bpcontrol.presentation
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.util.Log
+import com.fossyaudio.bpcontrol.shared.diagnostics.ProtocolLog
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlinx.coroutines.delay
@@ -15,7 +16,8 @@ class DacSyncService(
     private val usbMutex: Mutex,
     private val connectionProvider: () -> UsbDeviceConnection?,
     private val interfaceIdProvider: () -> Int,
-    private val endpointProvider: () -> UsbEndpoint?
+    private val endpointProvider: () -> UsbEndpoint?,
+    private val protocolLog: ProtocolLog? = null,
 ) {
     suspend fun pullValueSync(
         cmd: Byte,
@@ -30,6 +32,7 @@ class DacSyncService(
         return usbMutex.withLock {
             try {
                 val outBuffer = BlackPearlCodec.encodeReadRequest(cmd, p1, p2, p3)
+                protocolLog?.record("OUT", outBuffer)
 
                 val dump = ByteArray(BlackPearlProtocol.Frame.REPORT_SIZE)
                 while (
@@ -66,7 +69,9 @@ class DacSyncService(
                         inBuffer[BlackPearlProtocol.ParserOffset.DIRECTION] == readMarker &&
                         inBuffer[BlackPearlProtocol.ParserOffset.COMMAND] == cmd
                     ) {
-                        return@withLock inBuffer.copyOf()
+                        val response = inBuffer.copyOf()
+                        protocolLog?.record("IN", response)
+                        return@withLock response
                     }
                     delay(BlackPearlProtocol.Timing.READ_POLL_INTERVAL_MS)
                 }
