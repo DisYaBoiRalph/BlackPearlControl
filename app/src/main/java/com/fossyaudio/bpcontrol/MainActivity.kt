@@ -26,7 +26,6 @@ import androidx.core.content.IntentCompat
 import androidx.lifecycle.lifecycleScope
 import com.fossyaudio.bpcontrol.data.IPresetStorage
 import com.fossyaudio.bpcontrol.di.AppContainer
-import com.fossyaudio.bpcontrol.presentation.AutoEqParser
 import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.presentation.DacSyncService
 import com.fossyaudio.bpcontrol.presentation.MainViewModel
@@ -40,6 +39,7 @@ import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.model.PresetSource
+import com.fossyaudio.bpcontrol.shared.preset.AutoEqParser
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.shared.preset.uniqueName
@@ -727,7 +727,8 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Could not open file", Toast.LENGTH_LONG).show() }
                     return@launch
                 }
-                val result = stream.use { AutoEqParser.parse(it) }
+                val text = stream.use { it.bufferedReader().readText() }
+                val result = AutoEqParser.parse(text)
                 if (result.bands.isEmpty()) {
                     isSyncing = false
                     withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "No valid filters found", Toast.LENGTH_LONG).show() }

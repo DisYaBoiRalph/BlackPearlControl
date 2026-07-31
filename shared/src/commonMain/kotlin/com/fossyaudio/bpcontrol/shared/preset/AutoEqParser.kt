@@ -1,14 +1,14 @@
-package com.fossyaudio.bpcontrol.presentation
+package com.fossyaudio.bpcontrol.shared.preset
 
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
-import java.io.InputStream
 
 data class ParsedEqImport(
     val bands: List<FilterBand>,
     val preamp: Float
 )
 
+/** Parses AutoEQ ParametricEQ.txt-style text. Platform code supplies the file's text content. */
 object AutoEqParser {
 
     private val preampRegex = Regex("PREAMP\\s*[:=]?\\s*([-+.\\d]+)")
@@ -16,8 +16,8 @@ object AutoEqParser {
     private val gainRegex = Regex("GAIN\\s*[:=]?\\s*([-+.\\d]+)")
     private val qRegex = Regex("Q\\s*[:=]?\\s*([\\d.]+)")
 
-    fun parse(inputStream: InputStream, maxLines: Int = 200): ParsedEqImport {
-        val lines = inputStream.bufferedReader().readLines()
+    fun parse(text: String, maxLines: Int = 200): ParsedEqImport {
+        val lines = text.lineSequence().toList()
         val tempBands = mutableListOf<FilterBand>()
         var parsedPreamp = 0f
 

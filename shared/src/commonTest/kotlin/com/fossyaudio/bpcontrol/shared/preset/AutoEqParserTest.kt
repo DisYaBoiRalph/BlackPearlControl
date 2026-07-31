@@ -1,4 +1,4 @@
-package com.fossyaudio.bpcontrol.presentation
+package com.fossyaudio.bpcontrol.shared.preset
 
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import kotlin.test.Test
@@ -7,8 +7,7 @@ import kotlin.test.assertTrue
 
 class AutoEqParserTest {
 
-    private fun parse(text: String) =
-        AutoEqParser.parse(text.trimIndent().byteInputStream())
+    private fun parse(text: String) = AutoEqParser.parse(text.trimIndent())
 
     @Test
     fun parses_standard_10_band_autoeq_file() {
