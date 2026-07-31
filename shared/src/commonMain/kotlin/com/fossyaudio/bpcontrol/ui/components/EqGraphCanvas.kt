@@ -20,19 +20,12 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.fossyaudio.bpcontrol.shared.eq.BiquadCoefficients
-import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
+import com.fossyaudio.bpcontrol.shared.eq.activeCoefficients
+import com.fossyaudio.bpcontrol.shared.eq.freqAtFraction
+import com.fossyaudio.bpcontrol.shared.eq.totalGainDbAt
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import kotlin.math.log10
-import kotlin.math.pow
 import kotlin.math.roundToInt
-
-/** Summed response of every contributing band at [freq], in dB. */
-private fun totalGainDbAt(freq: Double, coeffs: List<BiquadCoefficients>): Double {
-    var total = 0.0
-    for (c in coeffs) total += BiquadMath.magnitudeDb(freq, c)
-    return total
-}
 
 /** Vertical drag beyond this leaves the drawable range; band gain clamps here too. */
 private const val MAX_BAND_GAIN_DB = 12f
@@ -80,17 +73,14 @@ fun EqGraphCanvas(
             safePadX + graphW * (log10(f / 20.0) / 3.0).toFloat()
 
         fun freqForX(x: Float): Double =
-            20.0 * 10.0.pow(((x - safePadX) / graphW) * 3.0)
+            freqAtFraction((x - safePadX) / graphW)
 
         val freqGridLines = remember(widthPx, graphW) {
             freqGridLevels.map { freq -> freq to xForFreq(freq.toFloat()) }
         }
 
         // Only the audible bands contribute; recomputed with the curve so both agree.
-        val activeBandCoeffs = remember(bands) {
-            bands.filter { it.enabled && kotlin.math.abs(it.gain) >= 0.1f }
-                .map { BiquadMath.coefficients(it) }
-        }
+        val activeBandCoeffs = remember(bands) { activeCoefficients(bands) }
 
         // Cache expensive curve computation — only rebuild when bands or canvas size changes.
         val curvePath = remember(bands, widthPx, heightPx) {
