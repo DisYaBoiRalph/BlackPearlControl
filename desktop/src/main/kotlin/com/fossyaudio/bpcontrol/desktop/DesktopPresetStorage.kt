@@ -6,6 +6,7 @@ import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.ensureSystemPresets
+import com.fossyaudio.bpcontrol.shared.preset.parsePresetSource
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import org.json.JSONArray
 import org.json.JSONObject
@@ -48,7 +49,9 @@ class DesktopPresetStorage(
                             bList.add(FilterBand(freq = DEFAULT_BAND_FREQS[b]))
                         }
                     }
-                    loaded.add(Preset(name = name, bands = bList))
+                    val source = parsePresetSource(name, pObj.takeIf { it.has("source") }?.getString("source"))
+                    val savedAt = pObj.optLong("savedAt", 0L)
+                    loaded.add(Preset(name = name, bands = bList, source = source, savedAt = savedAt))
                 }
             }
         }
@@ -61,6 +64,8 @@ class DesktopPresetStorage(
         for (preset in presets) {
             val pObj = JSONObject()
             pObj.put("name", preset.name)
+            pObj.put("source", preset.source.name)
+            pObj.put("savedAt", preset.savedAt)
             val bands = JSONArray()
             for (band in preset.bands) {
                 val bObj = JSONObject()

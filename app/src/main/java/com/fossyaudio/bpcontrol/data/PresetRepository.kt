@@ -8,6 +8,7 @@ import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.ensureSystemPresets
+import com.fossyaudio.bpcontrol.shared.preset.parsePresetSource
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import org.json.JSONArray
 import org.json.JSONObject
@@ -49,7 +50,9 @@ class PresetRepository(
                             bList.add(FilterBand(freq = DEFAULT_BAND_FREQS[b]))
                         }
                     }
-                    loaded.add(Preset(name, bList))
+                    val source = parsePresetSource(name, pObj.takeIf { it.has("source") }?.getString("source"))
+                    val savedAt = pObj.optLong("savedAt", 0L)
+                    loaded.add(Preset(name, bList, source, savedAt))
                 }
             } catch (e: org.json.JSONException) {
                 Log.e("Presets", "JSON Parse Error", e)
@@ -65,6 +68,8 @@ class PresetRepository(
         for (p in presets) {
             val pObj = JSONObject()
             pObj.put("name", p.name)
+            pObj.put("source", p.source.name)
+            pObj.put("savedAt", p.savedAt)
             val bArray = JSONArray()
             for (b in p.bands) {
                 val bObj = JSONObject()
