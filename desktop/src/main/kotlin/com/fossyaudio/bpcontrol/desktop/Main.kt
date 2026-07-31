@@ -11,6 +11,8 @@ import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
 import com.fossyaudio.bpcontrol.ui.MainScreen
 import com.fossyaudio.bpcontrol.ui.theme.BpControlTheme
+import java.awt.FileDialog
+import java.io.File
 
 fun main() = application {
     val windowState = rememberWindowState(size = DpSize(820.dp, 720.dp))
@@ -49,7 +51,16 @@ fun main() = application {
             onPresetDeleted = { name -> controller.onPresetDeleted(name, presetStorage) },
             onPresetRenamed = { index, newName -> controller.onPresetRenamed(index, newName, presetStorage) },
             onPresetDuplicated = { index -> controller.onPresetDuplicated(index, presetStorage) },
-            onImport = { /* TODO: desktop file picker for AutoEQ import */ },
+            onImport = {
+                val dialog = FileDialog(window, "Import AutoEQ preset", FileDialog.LOAD)
+                dialog.isVisible = true
+                val fileName = dialog.file
+                val dir = dialog.directory
+                if (fileName != null && dir != null) {
+                    val file = File(dir, fileName)
+                    controller.onImport(file.readText(), file.nameWithoutExtension, presetStorage)
+                }
+            },
             onExport = { /* TODO: desktop file picker for preset export */ },
         )
 

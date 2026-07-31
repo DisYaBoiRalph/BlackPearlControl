@@ -14,6 +14,7 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.setContent
@@ -744,12 +745,24 @@ class MainActivity : AppCompatActivity() {
                     if (i < result.bands.size) result.bands[i].copy()
                     else FilterBand(enabled = false, type = FilterType.PK, freq = DEFAULT_BAND_FREQS[i], gain = 0f, q = 1.0f)
                 }
-                val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
-                val nonePreset = presets[noneIdx]
-                val updatedNone = nonePreset.copy(bands = localBands)
-                presets = presets.toMutableList().also { it[noneIdx] = updatedNone }
-                currentPresetIndex = noneIdx
+
+                // A new library row, not an overwrite of "None" — None is the live-hardware slot,
+                // and an import needs somewhere durable to land or it is gone on the next read.
+                val baseName = queryDisplayName(uri)?.substringBeforeLast(".") ?: "Imported"
+                val name = uniqueName(baseName, presets)
+                val newPresets = presets.toMutableList()
+                newPresets.add(
+                    Preset(
+                        name = name,
+                        bands = localBands,
+                        source = PresetSource.IMPORTED,
+                        savedAt = System.currentTimeMillis(),
+                    )
+                )
+                presets = newPresets
+                currentPresetIndex = newPresets.size - 1
                 mainViewModel.uiState.updateEqBands(localBands)
+                savePresetsToPrefs()
 
                 isMassPushing = true
                 localBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
@@ -759,7 +772,7 @@ class MainActivity : AppCompatActivity() {
                 isMassPushing = false
                 isSyncing = false
                 debouncedSaveToFlash()
-                withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Import Successful", Toast.LENGTH_SHORT).show() }
+                withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Imported \"$name\"", Toast.LENGTH_SHORT).show() }
             } catch (e: Exception) {
                 Log.e("AutoEQ", "Import parsing failed", e)
                 isSyncing = false
@@ -767,6 +780,12 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
+    private fun queryDisplayName(uri: Uri): String? =
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            if (nameIndex >= 0 && cursor.moveToFirst()) cursor.getString(nameIndex) else null
+        }
 
     private fun saveSettingsToFile() { /* Export implementation unchanged */ }
 

@@ -4,10 +4,14 @@ import com.fossyaudio.bpcontrol.presentation.DacSettingsMapper
 import com.fossyaudio.bpcontrol.shared.audio.BALANCE_DB_LIMIT
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MAX_RAW
 import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
+import com.fossyaudio.bpcontrol.shared.audio.volDbToPct
+import com.fossyaudio.bpcontrol.shared.audio.volPctToDb
 import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
+import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.model.PresetSource
+import com.fossyaudio.bpcontrol.shared.preset.AutoEqParser
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.shared.preset.uniqueName
@@ -507,5 +511,50 @@ class DesktopController(private val state: AppUiState) {
         )
         state.updatePresets(newPresets)
         presetStorage.save(newPresets)
+    }
+
+    /**
+     * Parses AutoEQ text picked from disk and appends it as a new IMPORTED preset — never an
+     * overwrite of "None", which is the live-hardware slot and has nowhere durable to keep it.
+     */
+    fun onImport(text: String, suggestedName: String, presetStorage: DesktopPresetStorage) {
+        val result = AutoEqParser.parse(text)
+        if (result.bands.isEmpty()) return
+
+        if (result.preamp < 0) {
+            val volumePercent = state.volumePercent.value
+            val newPercent = volDbToPct(volPctToDb(volumePercent) + result.preamp).coerceIn(0f, 100f)
+            onVolumeChange(newPercent)
+        }
+
+        val localBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i ->
+            if (i < result.bands.size) result.bands[i].copy()
+            else FilterBand(enabled = false, type = FilterType.PK, freq = DEFAULT_BAND_FREQS[i], gain = 0f, q = 1.0f)
+        }
+
+        val presets = state.presets.value
+        val name = uniqueName(suggestedName, presets)
+        val newPresets = presets.toMutableList()
+        newPresets.add(
+            Preset(
+                name = name,
+                bands = localBands,
+                source = PresetSource.IMPORTED,
+                savedAt = System.currentTimeMillis(),
+            )
+        )
+        state.updatePresets(newPresets)
+        state.updateCurrentPresetIndex(newPresets.size - 1)
+        state.updateEqBands(localBands)
+        presetStorage.save(newPresets)
+
+        scope.launch {
+            state.updateIsMassPushing(true)
+            localBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
+            latchSettings()
+            delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS * 10)
+            state.updateIsMassPushing(false)
+            debouncedSaveToFlash()
+        }
     }
 }
