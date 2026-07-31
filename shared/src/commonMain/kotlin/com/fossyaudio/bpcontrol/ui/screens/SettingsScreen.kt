@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -23,7 +22,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -76,8 +74,6 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
     val ampTopoIndex by state.ampTopoIndex.collectAsState()
     val micGainDb by state.micGainDb.collectAsState()
     val isSyncing by state.isSyncing.collectAsState()
-
-    var showFactoryResetDialog by remember { mutableStateOf(false) }
 
     // Local drag state prevents polling-driven slider snaps while user is interacting
     var volDragging by remember { mutableStateOf(false) }
@@ -228,34 +224,6 @@ fun SettingsScreen(state: AppUiState, actions: AppActions) {
                 )
             }
         }
-
-        // Factory Reset
-        TextButton(
-            onClick = { showFactoryResetDialog = true },
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Text(
-                "Factory Reset All Settings",
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-    }
-
-    if (showFactoryResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showFactoryResetDialog = false },
-            title = { Text("Factory Reset") },
-            text = { Text("Restore all hardware settings and load the Flat EQ profile?") },
-            confirmButton = {
-                TextButton(onClick = {
-                    showFactoryResetDialog = false
-                    actions.onFactoryReset()
-                }) { Text("Reset", color = MaterialTheme.colorScheme.error) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showFactoryResetDialog = false }) { Text("Cancel") }
-            },
-        )
     }
 }
 

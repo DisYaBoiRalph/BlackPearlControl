@@ -10,6 +10,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Equalizer
+import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -19,7 +21,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import com.fossyaudio.bpcontrol.ui.screens.DeviceScreen
 import com.fossyaudio.bpcontrol.ui.screens.EqScreen
+import com.fossyaudio.bpcontrol.ui.screens.PresetsScreen
 import com.fossyaudio.bpcontrol.ui.screens.SettingsScreen
 
 @Composable
@@ -41,16 +45,35 @@ fun MainScreen(state: AppUiState, actions: AppActions) {
                     icon = { Icon(Icons.Filled.Equalizer, contentDescription = "PEQ") },
                     label = { Text("PEQ") },
                 )
+                NavigationBarItem(
+                    selected = currentRoute == ROUTE_PRESETS,
+                    onClick = { currentRoute = ROUTE_PRESETS },
+                    icon = { Icon(Icons.Filled.LibraryMusic, contentDescription = "Presets") },
+                    label = { Text("Presets") },
+                )
+                NavigationBarItem(
+                    selected = currentRoute == ROUTE_DEVICE,
+                    onClick = { currentRoute = ROUTE_DEVICE },
+                    icon = { Icon(Icons.Filled.Memory, contentDescription = "Device") },
+                    label = { Text("Device") },
+                )
             }
         },
     ) { innerPadding ->
         Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-            // Keep both tabs mounted so switching is instantaneous and never re-initializes PEQ.
+            // Keep every tab mounted so switching is instantaneous and never re-initializes PEQ.
+            // Four tabs is the ceiling for this approach — a fifth should move to a nav graph.
             Box(modifier = Modifier.tabLayer(visible = currentRoute == ROUTE_SETTINGS)) {
                 SettingsScreen(state = state, actions = actions)
             }
             Box(modifier = Modifier.tabLayer(visible = currentRoute == ROUTE_EQ)) {
                 EqScreen(state = state, actions = actions)
+            }
+            Box(modifier = Modifier.tabLayer(visible = currentRoute == ROUTE_PRESETS)) {
+                PresetsScreen(state = state, actions = actions)
+            }
+            Box(modifier = Modifier.tabLayer(visible = currentRoute == ROUTE_DEVICE)) {
+                DeviceScreen(state = state, actions = actions)
             }
         }
     }

@@ -4,6 +4,8 @@ import com.fossyaudio.bpcontrol.shared.model.FilterBand
 
 const val ROUTE_SETTINGS = "settings"
 const val ROUTE_EQ = "eq"
+const val ROUTE_PRESETS = "presets"
+const val ROUTE_DEVICE = "device"
 
 /**
  * All user-action callbacks that flow from composable screens back to the platform controller
