@@ -387,6 +387,7 @@ class MainActivity : AppCompatActivity() {
                             val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
                             clipboard.setPrimaryClip(ClipData.newPlainText("Protocol log", protocolLog.snapshot()))
                         },
+                        onResync = { readDacSettings() },
                     ),
                 )
             }
@@ -688,6 +689,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 mainViewModel.uiState.updateEqBands(localBands)
                 mainViewModel.uiState.updateIsConnected(true)
+                mainViewModel.uiState.updateLastSyncedAt(System.currentTimeMillis())
                 isSyncing = false
             }
         }

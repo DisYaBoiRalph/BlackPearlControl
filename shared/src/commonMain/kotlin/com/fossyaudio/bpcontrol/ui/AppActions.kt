@@ -34,4 +34,5 @@ data class AppActions(
     val onImport: () -> Unit,
     val onExport: () -> Unit,
     val onCopyLog: () -> Unit,
+    val onResync: () -> Unit,
 )

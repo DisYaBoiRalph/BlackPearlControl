@@ -304,8 +304,13 @@ class DesktopController(private val state: AppUiState) {
             }
             state.updateEqBands(localBands)
             state.updateIsConnected(true)
+            state.updateLastSyncedAt(System.currentTimeMillis())
             state.updateIsSyncing(false)
         }
+    }
+
+    fun onResync() {
+        scope.launch { readDacSettings() }
     }
 
     // ─── Volume polling ───────────────────────────────────────────────────────

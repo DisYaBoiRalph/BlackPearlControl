@@ -92,6 +92,10 @@ class AppUiState {
     val firmwareVersion: StateFlow<String> = _firmwareVersion.asStateFlow()
     fun updateFirmwareVersion(v: String) { _firmwareVersion.value = v }
 
+    private val _lastSyncedAt = MutableStateFlow<Long?>(null)
+    val lastSyncedAt: StateFlow<Long?> = _lastSyncedAt.asStateFlow()
+    fun updateLastSyncedAt(v: Long) { _lastSyncedAt.value = v }
+
     private val _lastSentPeqIndex = MutableStateFlow(-1)
     val lastSentPeqIndex: StateFlow<Int> = _lastSentPeqIndex.asStateFlow()
 

@@ -68,6 +68,7 @@ fun main() = application {
                 val selection = StringSelection(controller.protocolLog.snapshot())
                 Toolkit.getDefaultToolkit().systemClipboard.setContents(selection, selection)
             },
+            onResync = { controller.onResync() },
         )
 
         BpControlTheme {
