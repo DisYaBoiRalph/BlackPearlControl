@@ -63,7 +63,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- Convenience property delegates backed by ViewModel StateFlow ---
 
-    private var presets: MutableList<Preset>
+    private var presets: List<Preset>
         get() = mainViewModel.uiState.presets.value
         set(value) { mainViewModel.uiState.updatePresets(value) }
 
@@ -294,7 +294,8 @@ class MainActivity : AppCompatActivity() {
                             sendFilterUpdate(index, band)
                             if (currentPresetIndex in presets.indices) {
                                 val p = presets[currentPresetIndex]
-                                presets[currentPresetIndex] = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
+                                val updatedPreset = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
+                                presets = presets.toMutableList().also { it[currentPresetIndex] = updatedPreset }
                                 savePresetsToPrefs()
                             }
                             mainViewModel.uiState.updateEqBand(index, band)
@@ -637,7 +638,8 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                     val nonePreset = presets[noneIdx]
-                    presets[noneIdx] = nonePreset.copy(preamp = volumePercent, bands = localBands.toList())
+                    val updatedNone = nonePreset.copy(preamp = volumePercent, bands = localBands.toList())
+                    presets = presets.toMutableList().also { it[noneIdx] = updatedNone }
                     currentPresetIndex = noneIdx
                 }
                 mainViewModel.uiState.updateEqBands(localBands)
@@ -711,7 +713,8 @@ class MainActivity : AppCompatActivity() {
                 }
                 val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                 val nonePreset = presets[noneIdx]
-                presets[noneIdx] = nonePreset.copy(preamp = volumePercent, bands = localBands)
+                val updatedNone = nonePreset.copy(preamp = volumePercent, bands = localBands)
+                presets = presets.toMutableList().also { it[noneIdx] = updatedNone }
                 currentPresetIndex = noneIdx
                 mainViewModel.uiState.updateEqBands(localBands)
 

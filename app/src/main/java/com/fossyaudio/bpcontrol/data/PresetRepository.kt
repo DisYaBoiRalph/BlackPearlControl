@@ -17,7 +17,7 @@ class PresetRepository(
 ) : IPresetStorage {
     private val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
-    override fun load(): MutableList<Preset> {
+    override fun load(): List<Preset> {
         val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
         val jsonStr = prefs.getString(presetsKey, null)
         val loaded = mutableListOf<Preset>()

@@ -16,9 +16,9 @@ class AppUiState {
     private val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
     // --- Preset state ---
-    private val _presets = MutableStateFlow<MutableList<Preset>>(mutableListOf())
-    val presets: StateFlow<MutableList<Preset>> = _presets.asStateFlow()
-    fun updatePresets(list: MutableList<Preset>) { _presets.value = list }
+    private val _presets = MutableStateFlow<List<Preset>>(emptyList())
+    val presets: StateFlow<List<Preset>> = _presets.asStateFlow()
+    fun updatePresets(list: List<Preset>) { _presets.value = list }
 
     private val _currentPresetIndex = MutableStateFlow(0)
     val currentPresetIndex: StateFlow<Int> = _currentPresetIndex.asStateFlow()

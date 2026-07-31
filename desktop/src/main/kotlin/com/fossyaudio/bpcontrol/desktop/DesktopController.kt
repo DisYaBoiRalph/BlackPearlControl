@@ -283,7 +283,8 @@ class DesktopController(private val state: AppUiState) {
                 val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                 val nonePreset = presets.getOrNull(noneIdx)
                 if (nonePreset != null) {
-                    presets[noneIdx] = nonePreset.copy(bands = localBands.toList())
+                    val updatedNone = nonePreset.copy(bands = localBands.toList())
+                    state.updatePresets(presets.toMutableList().also { it[noneIdx] = updatedNone })
                 }
                 state.updateCurrentPresetIndex(noneIdx)
             }
@@ -424,8 +425,10 @@ class DesktopController(private val state: AppUiState) {
         val idx = state.currentPresetIndex.value
         if (idx in presets.indices) {
             val p = presets[idx]
-            presets[idx] = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
-            presetStorage.save(presets)
+            val updated = p.copy(bands = p.bands.toMutableList().also { it[index] = band.copy() })
+            val newPresets = presets.toMutableList().also { it[idx] = updated }
+            state.updatePresets(newPresets)
+            presetStorage.save(newPresets)
         }
         state.updateEqBand(index, band)
     }
