@@ -1,16 +1,19 @@
 package com.fossyaudio.bpcontrol.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -32,6 +35,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
@@ -72,28 +76,36 @@ fun EqBandRow(
             modifier = Modifier.size(22.dp),
         )
 
-        Box(modifier = Modifier.width(46.dp)) {
+        Column(modifier = Modifier.width(46.dp)) {
             Text(
-                text = band.type.name,
-                style = AppType.fieldValue,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { typeExpanded = true }
-                    .padding(vertical = Sp.s),
+                text = " ",
+                style = AppType.fieldLabel,
             )
-            DropdownMenu(
-                expanded = typeExpanded,
-                onDismissRequest = { typeExpanded = false },
-            ) {
-                FilterType.entries.forEach { type ->
-                    DropdownMenuItem(
-                        text = { Text(type.name, style = AppType.fieldValue) },
-                        onClick = {
-                            typeExpanded = false
-                            onUpdate(band.copy(type = type))
-                        },
-                    )
+            Box(modifier = Modifier.fillMaxWidth().height(40.dp)) {
+                Text(
+                    text = band.type.name,
+                    style = AppType.fieldValue,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraSmall)
+                        .clickable { typeExpanded = true }
+                        .wrapContentSize(Alignment.Center),
+                )
+                DropdownMenu(
+                    expanded = typeExpanded,
+                    onDismissRequest = { typeExpanded = false },
+                ) {
+                    FilterType.entries.forEach { type ->
+                        DropdownMenuItem(
+                            text = { Text(type.name, style = AppType.fieldValue) },
+                            onClick = {
+                                typeExpanded = false
+                                onUpdate(band.copy(type = type))
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -168,10 +180,7 @@ private fun CompactField(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(40.dp)
-                .background(
-                    MaterialTheme.colorScheme.surfaceContainerLow,
-                    MaterialTheme.shapes.small,
-                )
+                .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.extraSmall)
                 .padding(horizontal = Sp.s),
             contentAlignment = Alignment.CenterStart,
         ) {
