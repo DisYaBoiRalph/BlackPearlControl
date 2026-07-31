@@ -39,6 +39,7 @@ import com.fossyaudio.bpcontrol.shared.eq.BiquadMath
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
@@ -394,8 +395,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun resetUiToDefaults() {
         isSyncing = true
-        val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-        mainViewModel.uiState.updateEqBands(List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], enabled = false, gain = 0f) })
+        mainViewModel.uiState.updateEqBands(List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = DEFAULT_BAND_FREQS[i], enabled = false, gain = 0f) })
         mainViewModel.uiState.updateFilterIndex(-1)
         mainViewModel.uiState.updateGainModeIndex(-1)
         mainViewModel.uiState.updateAmpTopoIndex(-1)
@@ -536,8 +536,7 @@ class MainActivity : AppCompatActivity() {
     private fun readDacSettings() {
         if (usbConnection == null) return
         lifecycleScope.launch(Dispatchers.IO) {
-            val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
-            val localBands = MutableList(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
+            val localBands = MutableList(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = DEFAULT_BAND_FREQS[i]) }
             try {
                 isSyncing = true
 
@@ -700,7 +699,6 @@ class MainActivity : AppCompatActivity() {
                     withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "No valid filters found", Toast.LENGTH_LONG).show() }
                     return@launch
                 }
-                val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
                 if (result.preamp < 0) {
                     // AutoEQ preamp is a dB attenuation; apply it on the dB scale rather than
                     // treating it as a percentage offset.
@@ -709,7 +707,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 val localBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i ->
                     if (i < result.bands.size) result.bands[i].copy()
-                    else FilterBand(enabled = false, type = FilterType.PK, freq = defaultFreqs[i], gain = 0f, q = 1.0f)
+                    else FilterBand(enabled = false, type = FilterType.PK, freq = DEFAULT_BAND_FREQS[i], gain = 0f, q = 1.0f)
                 }
                 val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
                 val nonePreset = presets[noneIdx]

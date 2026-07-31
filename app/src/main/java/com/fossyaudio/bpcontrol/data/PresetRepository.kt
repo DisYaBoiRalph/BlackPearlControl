@@ -6,6 +6,8 @@ import com.fossyaudio.bpcontrol.data.IPresetStorage
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
+import com.fossyaudio.bpcontrol.shared.preset.ensureSystemPresets
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import org.json.JSONArray
 import org.json.JSONObject
@@ -15,7 +17,6 @@ class PresetRepository(
     private val prefsName: String = "BP_PRESETS",
     private val presetsKey: String = "presets_data"
 ) : IPresetStorage {
-    private val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
     override fun load(): List<Preset> {
         val prefs = context.getSharedPreferences(prefsName, Context.MODE_PRIVATE)
@@ -45,7 +46,7 @@ class PresetRepository(
                                 )
                             )
                         } else {
-                            bList.add(FilterBand(freq = defaultFreqs[b]))
+                            bList.add(FilterBand(freq = DEFAULT_BAND_FREQS[b]))
                         }
                     }
                     loaded.add(Preset(name, bList))
@@ -55,8 +56,7 @@ class PresetRepository(
             }
         }
 
-        ensureSystemPresets(loaded)
-        return loaded
+        return ensureSystemPresets(loaded)
     }
 
     override fun save(presets: List<Preset>) {
@@ -79,17 +79,5 @@ class PresetRepository(
             array.put(pObj)
         }
         prefs.edit().putString(presetsKey, array.toString()).apply()
-    }
-
-    private fun ensureSystemPresets(presets: MutableList<Preset>) {
-        if (presets.none { it.name == "Flat" }) {
-            val flatBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, enabled = true) }
-            presets.add(0, Preset("Flat", flatBands))
-        }
-
-        if (presets.none { it.name == "None" }) {
-            val noneBands = List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
-            presets.add(Preset("None", noneBands))
-        }
     }
 }

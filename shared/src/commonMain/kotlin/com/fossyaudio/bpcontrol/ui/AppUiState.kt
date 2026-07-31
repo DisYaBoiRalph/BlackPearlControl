@@ -2,6 +2,7 @@ package com.fossyaudio.bpcontrol.ui
 
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -12,8 +13,6 @@ import kotlinx.coroutines.flow.asStateFlow
  * (used directly in App composable). Contains all StateFlows consumed by shared Compose screens.
  */
 class AppUiState {
-
-    private val defaultFreqs = listOf(31, 63, 125, 250, 500, 1000, 2000, 4000, 8000, 16000)
 
     // --- Preset state ---
     private val _presets = MutableStateFlow<List<Preset>>(emptyList())
@@ -60,7 +59,7 @@ class AppUiState {
 
     // --- EQ bands ---
     private val _eqBands = MutableStateFlow<List<FilterBand>>(
-        List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i]) }
+        List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = DEFAULT_BAND_FREQS[i]) }
     )
     val eqBands: StateFlow<List<FilterBand>> = _eqBands.asStateFlow()
     fun updateEqBands(bands: List<FilterBand>) { _eqBands.value = bands.map { it.copy() } }
