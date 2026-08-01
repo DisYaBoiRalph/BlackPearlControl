@@ -13,7 +13,9 @@ import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.model.PresetSource
 import com.fossyaudio.bpcontrol.shared.preset.AutoEqParser
+import com.fossyaudio.bpcontrol.shared.preset.CURRENT_PRESET_NAME
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
+import com.fossyaudio.bpcontrol.shared.preset.FLAT_PRESET_NAME
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.shared.preset.uniqueName
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
@@ -294,13 +296,13 @@ class DesktopController(private val state: AppUiState) {
             if (matchIdx != -1) {
                 state.updateCurrentPresetIndex(matchIdx)
             } else {
-                val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
-                val nonePreset = presets.getOrNull(noneIdx)
-                if (nonePreset != null) {
-                    val updatedNone = nonePreset.copy(bands = localBands.toList())
-                    state.updatePresets(presets.toMutableList().also { it[noneIdx] = updatedNone })
+                val currentIdx = presets.indexOfFirst { it.name == CURRENT_PRESET_NAME }.coerceAtLeast(0)
+                val currentPreset = presets.getOrNull(currentIdx)
+                if (currentPreset != null) {
+                    val updatedCurrent = currentPreset.copy(bands = localBands.toList())
+                    state.updatePresets(presets.toMutableList().also { it[currentIdx] = updatedCurrent })
                 }
-                state.updateCurrentPresetIndex(noneIdx)
+                state.updateCurrentPresetIndex(currentIdx)
             }
             state.updateEqBands(localBands)
             state.updateIsConnected(true)
@@ -424,7 +426,7 @@ class DesktopController(private val state: AppUiState) {
             sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
             onBalanceChange(0f)
             val presets = state.presets.value
-            val flatIdx = presets.indexOfFirst { it.name == "Flat" }.coerceAtLeast(0)
+            val flatIdx = presets.indexOfFirst { it.name == FLAT_PRESET_NAME }.coerceAtLeast(0)
             state.updateCurrentPresetIndex(flatIdx)
             val flatPreset = presets.getOrNull(flatIdx)
             val flatBands = flatPreset?.bands ?: emptyList()
@@ -508,9 +510,9 @@ class DesktopController(private val state: AppUiState) {
     fun onPresetDuplicated(index: Int, presetStorage: DesktopPresetStorage) {
         val presets = state.presets.value
         val source = presets.getOrNull(index) ?: return
-        // Duplicating "None" is how a live hardware read gets saved as a real preset, so it
-        // copies the live eqBands, not None's own bands.
-        val bands = if (source.name == "None") {
+        // Duplicating "Current" is how a live hardware read gets saved as a real preset, so it
+        // copies the live eqBands, not its own bands.
+        val bands = if (source.name == CURRENT_PRESET_NAME) {
             state.eqBands.value.map { it.copy() }
         } else {
             source.bands.map { it.copy() }
@@ -531,7 +533,7 @@ class DesktopController(private val state: AppUiState) {
 
     /**
      * Parses AutoEQ text picked from disk and appends it as a new IMPORTED preset — never an
-     * overwrite of "None", which is the live-hardware slot and has nowhere durable to keep it.
+     * overwrite of "Current", which is the live-hardware slot and has nowhere durable to keep it.
      */
     fun onImport(text: String, suggestedName: String, presetStorage: DesktopPresetStorage) {
         val result = AutoEqParser.parse(text)

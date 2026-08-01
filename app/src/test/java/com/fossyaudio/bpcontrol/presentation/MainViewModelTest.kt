@@ -5,6 +5,7 @@ import com.fossyaudio.bpcontrol.shared.audio.VOL_MIN_RAW
 import com.fossyaudio.bpcontrol.shared.model.FilterBand
 import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
+import com.fossyaudio.bpcontrol.shared.preset.CURRENT_PRESET_NAME
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import kotlin.test.Test
@@ -46,7 +47,7 @@ class MainViewModelTest {
             else FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK)
         }
         val custom = Preset("Custom", customBands)
-        val none = Preset("None", List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
+        val none = Preset(CURRENT_PRESET_NAME, List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
         val match = PresetMatcher.identifyPreset(listOf(flat, custom, none), custom.bands.map { it.copy() })
 

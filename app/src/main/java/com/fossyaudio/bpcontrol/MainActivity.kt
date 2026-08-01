@@ -44,7 +44,9 @@ import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.model.PresetSource
 import com.fossyaudio.bpcontrol.shared.preset.AutoEqParser
+import com.fossyaudio.bpcontrol.shared.preset.CURRENT_PRESET_NAME
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
+import com.fossyaudio.bpcontrol.shared.preset.FLAT_PRESET_NAME
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.shared.preset.uniqueName
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlCodec
@@ -287,7 +289,7 @@ class MainActivity : AppCompatActivity() {
                                 sendHidCommand(byteArrayOf(WRITE, CMD_GAIN_MODE, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
                                 sendHidCommand(byteArrayOf(WRITE, CMD_AMP_TOPO, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END, END))
                                 updateBalance(0)
-                                val flatIdx = presets.indexOfFirst { it.name == "Flat" }.coerceAtLeast(0)
+                                val flatIdx = presets.indexOfFirst { it.name == FLAT_PRESET_NAME }.coerceAtLeast(0)
                                 currentPresetIndex = flatIdx
                                 val flatPreset = presets[flatIdx]
                                 flatPreset.bands.forEachIndexed { i, src ->
@@ -363,9 +365,9 @@ class MainActivity : AppCompatActivity() {
                         onPresetDuplicated = { index ->
                             if (index in presets.indices) {
                                 val source = presets[index]
-                                // Duplicating "None" is how a live hardware read gets saved as a
-                                // real preset, so it copies the live eqBands, not None's own bands.
-                                val bands = if (source.name == "None") {
+                                // Duplicating "Current" is how a live hardware read gets saved as
+                                // a real preset, so it copies the live eqBands, not its own bands.
+                                val bands = if (source.name == CURRENT_PRESET_NAME) {
                                     mainViewModel.uiState.eqBands.value.map { it.copy() }
                                 } else {
                                     source.bands.map { it.copy() }
@@ -684,11 +686,11 @@ class MainActivity : AppCompatActivity() {
                 if (matchIdx != -1) {
                     currentPresetIndex = matchIdx
                 } else {
-                    val noneIdx = presets.indexOfFirst { it.name == "None" }.coerceAtLeast(0)
-                    val nonePreset = presets[noneIdx]
-                    val updatedNone = nonePreset.copy(bands = localBands.toList())
-                    presets = presets.toMutableList().also { it[noneIdx] = updatedNone }
-                    currentPresetIndex = noneIdx
+                    val currentIdx = presets.indexOfFirst { it.name == CURRENT_PRESET_NAME }.coerceAtLeast(0)
+                    val currentPreset = presets[currentIdx]
+                    val updatedCurrent = currentPreset.copy(bands = localBands.toList())
+                    presets = presets.toMutableList().also { it[currentIdx] = updatedCurrent }
+                    currentPresetIndex = currentIdx
                 }
                 mainViewModel.uiState.updateEqBands(localBands)
                 mainViewModel.uiState.updateIsConnected(true)
@@ -761,8 +763,8 @@ class MainActivity : AppCompatActivity() {
                     else FilterBand(enabled = false, type = FilterType.PK, freq = DEFAULT_BAND_FREQS[i], gain = 0f, q = 1.0f)
                 }
 
-                // A new library row, not an overwrite of "None" — None is the live-hardware slot,
-                // and an import needs somewhere durable to land or it is gone on the next read.
+                // A new library row, not an overwrite of "Current" — that is the live-hardware
+                // slot, and an import needs somewhere durable to land or it is gone on the next read.
                 val baseName = queryDisplayName(uri)?.substringBeforeLast(".") ?: "Imported"
                 val name = uniqueName(baseName, presets)
                 val newPresets = presets.toMutableList()

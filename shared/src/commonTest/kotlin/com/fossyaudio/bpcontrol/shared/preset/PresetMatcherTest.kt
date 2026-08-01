@@ -18,7 +18,7 @@ class PresetMatcherTest {
             else FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK)
         }
         val custom = Preset("Custom", customBands)
-        val none = Preset("None", List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
+        val none = Preset(CURRENT_PRESET_NAME, List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
         val hwBands = custom.bands.map { it.copy() }
         val match = PresetMatcher.identifyPreset(listOf(flat, custom, none), hwBands)
@@ -33,7 +33,7 @@ class PresetMatcherTest {
             else FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK)
         }
         val zeroGainTypeLS = Preset("ZeroTypeLS", zeroGainTypeLSBands)
-        val none = Preset("None", List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
+        val none = Preset(CURRENT_PRESET_NAME, List(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = defaultFreqs[i], gain = 0f, type = FilterType.PK) })
 
         val hwBands = zeroGainTypeLS.bands.map { it.copy() }.toMutableList()
         hwBands[0] = hwBands[0].copy(type = FilterType.HS, gain = 0f)

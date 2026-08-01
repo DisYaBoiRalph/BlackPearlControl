@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.fossyaudio.bpcontrol.shared.preset.CURRENT_PRESET_NAME
 import com.fossyaudio.bpcontrol.shared.preset.PresetMatcher
 import com.fossyaudio.bpcontrol.ui.AppActions
 import com.fossyaudio.bpcontrol.ui.AppUiState
@@ -143,7 +144,7 @@ fun PresetsScreen(state: AppUiState, actions: AppActions) {
                 items(filtered, key = { it.index }) { (index, preset) ->
                     PresetRow(
                         preset = preset,
-                        active = if (activeIndex == -1) preset.name == "None" else index == activeIndex,
+                        active = if (activeIndex == -1) preset.name == CURRENT_PRESET_NAME else index == activeIndex,
                         enabled = !isSyncing,
                         onLoad = { actions.onPresetLoaded(index) },
                         onRename = { renameIndex = index; renameText = preset.name },

@@ -9,7 +9,7 @@ import kotlin.math.abs
 object PresetMatcher {
     fun identifyPreset(presets: List<Preset>, hwBands: List<FilterBand>): Int {
         for (i in presets.indices) {
-            if (presets[i].name == "None") continue
+            if (presets[i].name == CURRENT_PRESET_NAME) continue
             var match = true
 
             for (b in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {

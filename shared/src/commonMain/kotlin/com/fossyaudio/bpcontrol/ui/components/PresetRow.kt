@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.model.PresetSource
+import com.fossyaudio.bpcontrol.shared.preset.CURRENT_PRESET_NAME
 import com.fossyaudio.bpcontrol.ui.theme.Sp
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
@@ -50,8 +51,8 @@ private val defaultSparkStroke = Color(0xFF00BFFF)
 /**
  * One row of the preset library: source tile, name, metadata, sparkline and an overflow menu.
  * Tap anywhere on the row to load; the menu itself never loads (that's the row's job) — it
- * offers Rename, Duplicate and Delete, hiding Rename/Delete for "Flat" and "None", which are not
- * user presets.
+ * offers Rename, Duplicate and Delete, hiding Rename/Delete for "Flat" and "Current", which are
+ * not user presets.
  */
 @Composable
 fun PresetRow(
@@ -65,7 +66,7 @@ fun PresetRow(
     enabled: Boolean = true,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val isSystemPreset = preset.name == "None" || preset.source == PresetSource.BUILT_IN
+    val isSystemPreset = preset.name == CURRENT_PRESET_NAME || preset.source == PresetSource.BUILT_IN
 
     Row(
         modifier = modifier
@@ -120,7 +121,7 @@ fun PresetRow(
                 )
             }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
-                if (preset.name != "None") {
+                if (preset.name != CURRENT_PRESET_NAME) {
                     DropdownMenuItem(
                         text = { Text("Load") },
                         onClick = { menuExpanded = false; onLoad() },
@@ -150,7 +151,7 @@ fun PresetRow(
 @Composable
 private fun SourceTile(preset: Preset, active: Boolean) {
     val icon: ImageVector = when {
-        preset.name == "None" -> Icons.Filled.Cable
+        preset.name == CURRENT_PRESET_NAME -> Icons.Filled.Cable
         preset.source == PresetSource.BUILT_IN -> Icons.Filled.HorizontalRule
         preset.source == PresetSource.IMPORTED -> Icons.Filled.Description
         else -> Icons.Filled.Edit
@@ -174,7 +175,7 @@ private fun SourceTile(preset: Preset, active: Boolean) {
 }
 
 private fun presetMeta(preset: Preset): String {
-    if (preset.name == "None") return "Live hardware read"
+    if (preset.name == CURRENT_PRESET_NAME) return "Live · whatever the hardware has now"
     return when (preset.source) {
         PresetSource.BUILT_IN -> "Built in · ${preset.bands.size} bands"
         PresetSource.IMPORTED -> "Imported file" + savedAtSuffix(preset.savedAt)

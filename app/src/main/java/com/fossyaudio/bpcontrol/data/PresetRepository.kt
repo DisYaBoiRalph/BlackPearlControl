@@ -8,6 +8,7 @@ import com.fossyaudio.bpcontrol.shared.model.FilterType
 import com.fossyaudio.bpcontrol.shared.model.Preset
 import com.fossyaudio.bpcontrol.shared.preset.DEFAULT_BAND_FREQS
 import com.fossyaudio.bpcontrol.shared.preset.ensureSystemPresets
+import com.fossyaudio.bpcontrol.shared.preset.migrateLegacyName
 import com.fossyaudio.bpcontrol.shared.preset.parsePresetSource
 import com.fossyaudio.bpcontrol.transport.protocol.BlackPearlProtocol
 import org.json.JSONArray
@@ -29,7 +30,7 @@ class PresetRepository(
                 val array = JSONArray(jsonStr)
                 for (i in 0 until array.length()) {
                     val pObj = array.getJSONObject(i)
-                    val name = pObj.getString("name")
+                    val name = migrateLegacyName(pObj.getString("name"))
                     val bArray = pObj.getJSONArray("filters")
                     val bList = mutableListOf<FilterBand>()
                     for (b in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
