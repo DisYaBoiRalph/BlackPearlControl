@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.HorizontalRule
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -64,6 +65,8 @@ fun PresetRow(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    /** True while this row's own content is known stale — e.g. Current mid mass-push. */
+    loading: Boolean = false,
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
     val isSystemPreset = preset.name == CURRENT_PRESET_NAME || preset.source == PresetSource.BUILT_IN
@@ -89,7 +92,7 @@ fun PresetRow(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = presetMeta(preset),
+                text = if (loading) "Applying…" else presetMeta(preset),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -99,12 +102,21 @@ fun PresetRow(
             modifier = Modifier
                 .size(width = 56.dp, height = 28.dp)
                 .background(MaterialTheme.colorScheme.surfaceContainerLow, RoundedCornerShape(6.dp)),
+            contentAlignment = Alignment.Center,
         ) {
-            PresetSparkline(
-                bands = preset.bands,
-                stroke = if (active) MaterialTheme.colorScheme.primary else defaultSparkStroke,
-                modifier = Modifier.fillMaxSize(),
-            )
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(16.dp),
+                    strokeWidth = 2.dp,
+                    color = if (active) MaterialTheme.colorScheme.primary else defaultSparkStroke,
+                )
+            } else {
+                PresetSparkline(
+                    bands = preset.bands,
+                    stroke = if (active) MaterialTheme.colorScheme.primary else defaultSparkStroke,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
         }
 
         Box {

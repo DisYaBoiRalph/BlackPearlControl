@@ -129,6 +129,10 @@ class MainActivity : AppCompatActivity() {
         get() = mainViewModel.uiState.isMassPushing.value
         set(value) { mainViewModel.uiState.updateIsMassPushing(value) }
 
+    private var isRefreshingCurrent: Boolean
+        get() = mainViewModel.uiState.isRefreshingCurrent.value
+        set(value) { mainViewModel.uiState.updateIsRefreshingCurrent(value) }
+
     private var dacBalLeft: Int
         get() = mainViewModel.uiState.dacBalLeft.value
         set(value) { mainViewModel.uiState.updateDacBalance(value, dacBalRight) }
@@ -160,6 +164,7 @@ class MainActivity : AppCompatActivity() {
 
     private var peqVerifyJob: Job? = null
     private var pollingJob: Job? = null
+    private var currentPresetPollJob: Job? = null
     private var volumeDebounceJob: Job? = null
     private var isAppInFocus = false
 
@@ -301,6 +306,14 @@ class MainActivity : AppCompatActivity() {
                                 mainViewModel.uiState.updateEqBands(flatPreset.bands)
                                 saveToFlash()
                                 isSyncing = false
+                                // This block is Main-dispatched (only enqueues so far, never
+                                // blocks); the hardware read below does blocking native transfers,
+                                // so it needs its own IO-dispatched coroutine.
+                                isRefreshingCurrent = true
+                                lifecycleScope.launch(Dispatchers.IO) {
+                                    refreshCurrentPresetFromHardware()
+                                    isRefreshingCurrent = false
+                                }
                                 Toast.makeText(this@MainActivity, "System Flat", Toast.LENGTH_SHORT).show()
                             }
                         },
@@ -329,6 +342,9 @@ class MainActivity : AppCompatActivity() {
                                 selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b) }
                                 while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
                                 isMassPushing = false
+                                isRefreshingCurrent = true
+                                refreshCurrentPresetFromHardware()
+                                isRefreshingCurrent = false
                                 withContext(Dispatchers.Main) {
                                     Toast.makeText(this@MainActivity, "Preset Loaded: ${selected.name}", Toast.LENGTH_SHORT).show()
                                 }
@@ -408,6 +424,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             readDacSettings()
             startVolumePolling()
+            startCurrentPresetPolling()
         }
     }
 
@@ -415,6 +432,7 @@ class MainActivity : AppCompatActivity() {
         isAppInFocus = false
         usbConnectionManager.setAppInFocus(false)
         pollingJob?.cancel()
+        currentPresetPollJob?.cancel()
         super.onPause()
     }
 
@@ -440,6 +458,7 @@ class MainActivity : AppCompatActivity() {
                 delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
                 readDacSettings()
                 startVolumePolling()
+                startCurrentPresetPolling()
             }
         }
     }
@@ -527,6 +546,63 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
+    }
+
+    /**
+     * Keeps the "Current" preset row honest with a genuine hardware readback, independent of
+     * eqBands (which is optimistic app state, set the instant a write is enqueued — not confirmed
+     * by the DAC). Never touches currentPresetIndex or eqBands; only Current's own stored bands.
+     */
+    private fun startCurrentPresetPolling() {
+        currentPresetPollJob?.cancel()
+        currentPresetPollJob = lifecycleScope.launch(Dispatchers.IO) {
+            while (usbConnection != null) {
+                delay(BlackPearlProtocol.Timing.CURRENT_PRESET_POLL_INTERVAL_MS)
+                if (!isAppInFocus) continue
+                refreshCurrentPresetFromHardware()
+            }
+        }
+    }
+
+    /**
+     * One genuine hardware read of the "Current" preset's bands, applied only if the read
+     * completed without any write racing it — see [readPeqBandsFromHardware]. Safe to call right
+     * after a mass push finishes, so Current updates promptly instead of waiting for the next
+     * scheduled poll tick.
+     */
+    private suspend fun refreshCurrentPresetFromHardware() {
+        val hwBands = readPeqBandsFromHardware() ?: return
+        val currentIdx = presets.indexOfFirst { it.name == CURRENT_PRESET_NAME }
+        if (currentIdx != -1) {
+            val updated = presets[currentIdx].copy(bands = hwBands)
+            presets = presets.toMutableList().also { it[currentIdx] = updated }
+            // Deliberately not persisted — this is a live mirror, not a save-worthy edit.
+        }
+    }
+
+    /**
+     * One 10-band PEQ read cycle, band-only — no activeSlot tracking, no other settings.
+     *
+     * Returns null, discarding the whole cycle, if any write starts mid-read. Writes are enqueued
+     * asynchronously (sendFilterUpdate returns before the frame is actually on the wire), while
+     * this read is synchronous — without this guard a read can race ahead of a still-queued write
+     * for the same band and return the value it is about to replace, which reads as a dropped or
+     * carried-over filter.
+     */
+    private suspend fun readPeqBandsFromHardware(): List<FilterBand>? {
+        val bands = MutableList(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = DEFAULT_BAND_FREQS[i]) }
+        for (i in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
+            if (isSyncing || isMassPushing || usbCommandQueueProcessor.hasPendingWork()) return null
+            pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
+                val parsedBand = dacSettingsMapper.parsePeqBand(data)
+                bands[i] = FilterBand(
+                    freq = parsedBand.freq, q = parsedBand.q,
+                    gain = parsedBand.gain, type = parsedBand.type, enabled = parsedBand.enabled
+                )
+            }
+            delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
+        }
+        return bands
     }
 
     private fun updateHardwareVolume(latchAndSave: Boolean = true) {
@@ -720,6 +796,7 @@ class MainActivity : AppCompatActivity() {
                                     delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
                                     readDacSettings()
                                     startVolumePolling()
+                                    startCurrentPresetPolling()
                                 }
                             }
                         }
@@ -790,6 +867,9 @@ class MainActivity : AppCompatActivity() {
                 delay(BlackPearlProtocol.Timing.MASS_PUSH_SETTLE_DELAY_MS)
                 isMassPushing = false
                 isSyncing = false
+                isRefreshingCurrent = true
+                refreshCurrentPresetFromHardware()
+                isRefreshingCurrent = false
                 withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Imported \"$name\"", Toast.LENGTH_SHORT).show() }
             } catch (e: Exception) {
                 Log.e("AutoEQ", "Import parsing failed", e)
@@ -812,6 +892,7 @@ class MainActivity : AppCompatActivity() {
         volumeDebounceJob?.cancel()
         usbConnectionManager.closeConnection(lifecycleScope)
         pollingJob?.cancel()
+        currentPresetPollJob?.cancel()
         resetUiToDefaults()
         protocolLog.clear()
     }

@@ -61,12 +61,14 @@ class DesktopController(private val state: AppUiState) {
     private val mapper = DacSettingsMapper(VOL_MIN_RAW, VOL_MAX_RAW)
     private val sendQueue = LinkedBlockingQueue<ByteArray>(BlackPearlProtocol.Timing.QUEUE_CAPACITY)
     private val running = AtomicBoolean(false)
+    private val sendQueueActive = AtomicBoolean(false)
     val protocolLog = ProtocolLog()
 
     private var hidServices: HidServices? = null
     private var device: HidDevice? = null
     private var connectJob: Job? = null
     private var pollJob: Job? = null
+    private var currentPresetPollJob: Job? = null
     private var sendJob: Job? = null
     private var flashJob: Job? = null
 
@@ -91,6 +93,7 @@ class DesktopController(private val state: AppUiState) {
         running.set(false)
         connectJob?.cancel()
         pollJob?.cancel()
+        currentPresetPollJob?.cancel()
         sendJob?.cancel()
         flashJob?.cancel()
         device?.close()
@@ -129,6 +132,7 @@ class DesktopController(private val state: AppUiState) {
                 delay(BlackPearlProtocol.Timing.POST_CONNECT_SYNC_DELAY_MS)
                 readDacSettings()
                 startVolumePolling()
+                startCurrentPresetPolling()
             }
         }
     }
@@ -147,22 +151,30 @@ class DesktopController(private val state: AppUiState) {
         sendJob = scope.launch {
             while (isActive && running.get()) {
                 val payload = sendQueue.poll(100, TimeUnit.MILLISECONDS) ?: continue
-                val dev = device ?: continue
-                if (!dev.isOpen) { device = null; break }
+                sendQueueActive.set(true)
+                try {
+                    val dev = device ?: continue
+                    if (!dev.isOpen) { device = null; break }
 
-                val delayMs = when (payload.getOrNull(1)) {
-                    CMD_FLASH_EQ -> BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS
-                    CMD_PEQ_VALUES -> BlackPearlProtocol.Timing.QUEUE_DELAY_PEQ_MS
-                    CMD_GLOBAL_GAIN -> BlackPearlProtocol.Timing.QUEUE_DELAY_GLOBAL_GAIN_MS
-                    else -> BlackPearlProtocol.Timing.QUEUE_DELAY_DEFAULT_MS
+                    val delayMs = when (payload.getOrNull(1)) {
+                        CMD_FLASH_EQ -> BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS
+                        CMD_PEQ_VALUES -> BlackPearlProtocol.Timing.QUEUE_DELAY_PEQ_MS
+                        CMD_GLOBAL_GAIN -> BlackPearlProtocol.Timing.QUEUE_DELAY_GLOBAL_GAIN_MS
+                        else -> BlackPearlProtocol.Timing.QUEUE_DELAY_DEFAULT_MS
+                    }
+
+                    // hid4java prepends the reportId parameter itself — pass payload directly.
+                    dev.write(payload, payload.size, BlackPearlProtocol.Device.REPORT_ID)
+                    delay(delayMs)
+                } finally {
+                    if (sendQueue.isEmpty()) sendQueueActive.set(false)
                 }
-
-                // hid4java prepends the reportId parameter itself — pass payload directly.
-                dev.write(payload, payload.size, BlackPearlProtocol.Device.REPORT_ID)
-                delay(delayMs)
             }
         }
     }
+
+    /** Queue non-empty, or a frame is mid-transfer — mirrors Android's UsbCommandQueueProcessor. */
+    private fun hasPendingSendWork(): Boolean = sendQueue.isNotEmpty() || sendQueueActive.get()
 
     // ─── Synchronous read (blocks up to timeout) ─────────────────────────────
 
@@ -336,6 +348,63 @@ class DesktopController(private val state: AppUiState) {
         }
     }
 
+    /**
+     * Keeps the "Current" preset row honest with a genuine hardware readback, independent of
+     * eqBands (which is optimistic app state, set the instant a write is enqueued — not confirmed
+     * by the DAC). Never touches currentPresetIndex or eqBands; only Current's own stored bands.
+     */
+    private fun startCurrentPresetPolling() {
+        currentPresetPollJob?.cancel()
+        currentPresetPollJob = scope.launch {
+            while (isActive && running.get()) {
+                delay(BlackPearlProtocol.Timing.CURRENT_PRESET_POLL_INTERVAL_MS)
+                refreshCurrentPresetFromHardware()
+            }
+        }
+    }
+
+    /**
+     * One genuine hardware read of the "Current" preset's bands, applied only if the read
+     * completed without any write racing it — see [readPeqBandsFromHardware]. Safe to call right
+     * after a mass push finishes, so Current updates promptly instead of waiting for the next
+     * scheduled poll tick.
+     */
+    private suspend fun refreshCurrentPresetFromHardware() {
+        val hwBands = readPeqBandsFromHardware() ?: return
+        val presets = state.presets.value
+        val currentIdx = presets.indexOfFirst { it.name == CURRENT_PRESET_NAME }
+        if (currentIdx != -1) {
+            val updated = presets[currentIdx].copy(bands = hwBands)
+            // Deliberately not persisted — this is a live mirror, not a save-worthy edit.
+            state.updatePresets(presets.toMutableList().also { it[currentIdx] = updated })
+        }
+    }
+
+    /**
+     * One 10-band PEQ read cycle, band-only — no activeSlot tracking, no other settings.
+     *
+     * Returns null, discarding the whole cycle, if any write starts mid-read. Writes are enqueued
+     * asynchronously (enqueue() returns before the frame is actually on the wire), while this read
+     * is synchronous — without this guard a read can race ahead of a still-queued write for the
+     * same band and return the value it is about to replace, which reads as a dropped or
+     * carried-over filter.
+     */
+    private suspend fun readPeqBandsFromHardware(): List<FilterBand>? {
+        val bands = MutableList(BlackPearlProtocol.Frame.BAND_COUNT) { i -> FilterBand(freq = DEFAULT_BAND_FREQS[i]) }
+        for (i in 0 until BlackPearlProtocol.Frame.BAND_COUNT) {
+            if (state.isSyncing.value || state.isMassPushing.value || hasPendingSendWork()) return null
+            pullValueSync(CMD_PEQ_VALUES, END, END, i.toByte())?.let { data ->
+                val parsedBand = mapper.parsePeqBand(data)
+                bands[i] = FilterBand(
+                    freq = parsedBand.freq, q = parsedBand.q,
+                    gain = parsedBand.gain, type = parsedBand.type, enabled = parsedBand.enabled
+                )
+            }
+            delay(BlackPearlProtocol.Timing.SETTINGS_READ_STEP_DELAY_MS)
+        }
+        return bands
+    }
+
     // ─── HID command helpers ─────────────────────────────────────────────────
 
     private fun sendHidCommand(payload: ByteArray) = enqueue(payload)
@@ -439,6 +508,9 @@ class DesktopController(private val state: AppUiState) {
             state.updateEqBands(flatBands)
             sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
             state.updateIsSyncing(false)
+            state.updateIsRefreshingCurrent(true)
+            refreshCurrentPresetFromHardware()
+            state.updateIsRefreshingCurrent(false)
         }
     }
 
@@ -474,6 +546,9 @@ class DesktopController(private val state: AppUiState) {
             selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b) }
             delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS * 10)
             state.updateIsMassPushing(false)
+            state.updateIsRefreshingCurrent(true)
+            refreshCurrentPresetFromHardware()
+            state.updateIsRefreshingCurrent(false)
         }
     }
 
@@ -574,6 +649,9 @@ class DesktopController(private val state: AppUiState) {
             localBands.forEachIndexed { i, b -> sendFilterUpdate(i, b) }
             delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS * 10)
             state.updateIsMassPushing(false)
+            state.updateIsRefreshingCurrent(true)
+            refreshCurrentPresetFromHardware()
+            state.updateIsRefreshingCurrent(false)
         }
     }
 }

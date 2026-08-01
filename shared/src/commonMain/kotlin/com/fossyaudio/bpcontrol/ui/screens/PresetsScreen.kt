@@ -51,6 +51,7 @@ fun PresetsScreen(state: AppUiState, actions: AppActions) {
     val eqBands by state.eqBands.collectAsState()
     val isSyncing by state.isSyncing.collectAsState()
     val isMassPushing by state.isMassPushing.collectAsState()
+    val isRefreshingCurrent by state.isRefreshingCurrent.collectAsState()
 
     var searchOpen by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
@@ -142,10 +143,16 @@ fun PresetsScreen(state: AppUiState, actions: AppActions) {
                 contentPadding = PaddingValues(bottom = Sp.m),
             ) {
                 items(filtered, key = { it.index }) { (index, preset) ->
+                    // "Current" is kept genuinely fresh by a background hardware poll (see
+                    // MainActivity/DesktopController), so its own .bands are already live —
+                    // no substitution needed here. While a push is in flight, though, that read
+                    // is deliberately stale (it can't safely race the write), so show a loading
+                    // state rather than the misleadingly-unchanged old sparkline.
                     PresetRow(
                         preset = preset,
                         active = if (activeIndex == -1) preset.name == CURRENT_PRESET_NAME else index == activeIndex,
                         enabled = !isSyncing,
+                        loading = (isMassPushing || isRefreshingCurrent) && preset.name == CURRENT_PRESET_NAME,
                         onLoad = { actions.onPresetLoaded(index) },
                         onRename = { renameIndex = index; renameText = preset.name },
                         onDuplicate = { actions.onPresetDuplicated(index) },

@@ -83,6 +83,17 @@ class AppUiState {
     val isMassPushing: StateFlow<Boolean> = _isMassPushing.asStateFlow()
     fun updateIsMassPushing(v: Boolean) { _isMassPushing.value = v }
 
+    /**
+     * True from the moment a mass push finishes until the "Current" preset's post-push hardware
+     * refresh completes. isMassPushing alone isn't enough for a loading indicator: it flips false
+     * as soon as the queue drains, but the refresh read (~1 s for 10 bands) still has to run after
+     * that before Current's bands actually reflect the push — without this flag the loading state
+     * disappears before the data it was covering for has arrived.
+     */
+    private val _isRefreshingCurrent = MutableStateFlow(false)
+    val isRefreshingCurrent: StateFlow<Boolean> = _isRefreshingCurrent.asStateFlow()
+    fun updateIsRefreshingCurrent(v: Boolean) { _isRefreshingCurrent.value = v }
+
     // --- Hardware bookkeeping ---
     private val _activeSlot = MutableStateFlow<Byte>(BlackPearlProtocol.Frame.END)
     val activeSlot: StateFlow<Byte> = _activeSlot.asStateFlow()
