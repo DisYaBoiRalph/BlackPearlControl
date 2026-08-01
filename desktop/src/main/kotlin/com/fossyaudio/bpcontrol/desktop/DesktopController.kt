@@ -428,11 +428,13 @@ class DesktopController(private val state: AppUiState) {
             state.updateCurrentPresetIndex(flatIdx)
             val flatPreset = presets.getOrNull(flatIdx)
             val flatBands = flatPreset?.bands ?: emptyList()
+            // Latch per band: the DAC's latch appears to commit only the most recent write, not a
+            // batch — a single trailing latch after a multi-band push left all but the last band
+            // unapplied in practice.
             flatBands.forEachIndexed { i, src ->
-                sendFilterUpdate(i, src, autoLatch = false)
+                sendFilterUpdate(i, src)
             }
             state.updateEqBands(flatBands)
-            latchSettings()
             sendHidCommand(byteArrayOf(WRITE, CMD_FLASH_EQ, BlackPearlProtocol.Frame.BASE_DATA_LENGTH, END))
             state.updateIsSyncing(false)
         }
@@ -464,11 +466,12 @@ class DesktopController(private val state: AppUiState) {
         state.updateEqBands(selected.bands)
         scope.launch {
             state.updateIsMassPushing(true)
-            selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
-            latchSettings()
+            // Latch per band: the DAC's latch appears to commit only the most recent write, not a
+            // batch — a single trailing latch after a multi-band push left all but the last band
+            // unapplied in practice.
+            selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b) }
             delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS * 10)
             state.updateIsMassPushing(false)
-            debouncedSaveToFlash()
         }
     }
 
@@ -563,11 +566,12 @@ class DesktopController(private val state: AppUiState) {
 
         scope.launch {
             state.updateIsMassPushing(true)
-            localBands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
-            latchSettings()
+            // Latch per band: the DAC's latch appears to commit only the most recent write, not a
+            // batch — a single trailing latch after a multi-band push left all but the last band
+            // unapplied in practice.
+            localBands.forEachIndexed { i, b -> sendFilterUpdate(i, b) }
             delay(BlackPearlProtocol.Timing.QUEUE_DELAY_FLASH_EQ_MS * 10)
             state.updateIsMassPushing(false)
-            debouncedSaveToFlash()
         }
     }
 }

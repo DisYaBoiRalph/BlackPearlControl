@@ -291,10 +291,12 @@ class MainActivity : AppCompatActivity() {
                                 currentPresetIndex = flatIdx
                                 val flatPreset = presets[flatIdx]
                                 flatPreset.bands.forEachIndexed { i, src ->
-                                    sendFilterUpdate(i, src, autoLatch = false)
+                                    // Latch per band: the DAC's latch appears to commit only the
+                                    // most recent write, not a batch — a single trailing latch
+                                    // after a multi-band push leaves all but the last band unapplied.
+                                    sendFilterUpdate(i, src)
                                 }
                                 mainViewModel.uiState.updateEqBands(flatPreset.bands)
-                                latchSettings()
                                 saveToFlash()
                                 isSyncing = false
                                 Toast.makeText(this@MainActivity, "System Flat", Toast.LENGTH_SHORT).show()
@@ -319,11 +321,12 @@ class MainActivity : AppCompatActivity() {
                             mainViewModel.uiState.updateEqBands(selected.bands)
                             lifecycleScope.launch(Dispatchers.IO) {
                                 isMassPushing = true
-                                selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b, autoLatch = false) }
-                                latchSettings()
+                                // Latch per band: the DAC's latch appears to commit only the most
+                                // recent write, not a batch — a single trailing latch after a
+                                // multi-band push left all but the last band unapplied in practice.
+                                selected.bands.forEachIndexed { i, b -> sendFilterUpdate(i, b) }
                                 while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
                                 isMassPushing = false
-                                debouncedSaveToFlash()
                                 withContext(Dispatchers.Main) {
                                     Toast.makeText(this@MainActivity, "Preset Loaded: ${selected.name}", Toast.LENGTH_SHORT).show()
                                 }
@@ -777,13 +780,14 @@ class MainActivity : AppCompatActivity() {
                 savePresetsToPrefs()
 
                 isMassPushing = true
-                localBands.forEachIndexed { index, band -> sendFilterUpdate(index, band, autoLatch = false) }
-                latchSettings()
+                // Latch per band: the DAC's latch appears to commit only the most recent write,
+                // not a batch — a single trailing latch after a multi-band push left all but the
+                // last band unapplied in practice.
+                localBands.forEachIndexed { index, band -> sendFilterUpdate(index, band) }
                 while (usbCommandQueueProcessor.hasPendingWork()) { delay(BlackPearlProtocol.Timing.MASS_PUSH_POLL_DELAY_MS) }
                 delay(BlackPearlProtocol.Timing.MASS_PUSH_SETTLE_DELAY_MS)
                 isMassPushing = false
                 isSyncing = false
-                debouncedSaveToFlash()
                 withContext(Dispatchers.Main) { Toast.makeText(this@MainActivity, "Imported \"$name\"", Toast.LENGTH_SHORT).show() }
             } catch (e: Exception) {
                 Log.e("AutoEQ", "Import parsing failed", e)
